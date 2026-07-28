@@ -27,18 +27,42 @@ Bài Lab giúp bạn hiểu rõ sự tiến hóa qua 4 cấp độ của hệ th
 ├── 📄 requirements.txt          <-- 📦 Thư viện cần cài đặt
 │
 ├── 📁 config/                   <-- 🛠️ CẤU HÌNH & DỮ LIỆU
-│   └── 📄 test_cases.json       <-- 🟢 [Role 1] Bộ đề 5 Test Cases thử thách AI
+│   ├── 📄 test_cases.json       <-- 🟢 [Role 1] 13 Test Cases kèm ĐÁP ÁN GỐC
+│   ├── 📄 listings.txt          <-- 🏠 [Role 1] 10.000 căn hộ (CSV, chỉ đọc)
+│   ├── 📄 bookings.txt          <-- 📅 [Role 1] Lịch hẹn xem nhà (CSV, ĐỌC/GHI)
+│   ├── 📄 generate_listings.py  <-- 🏗️ Script sinh dữ liệu căn hộ (deterministic theo seed)
+│   └── 📄 generate_bookings.py  <-- 📅 Script sinh lịch hẹn có sẵn
 │
-├── 📁 src/                      <-- 💻 MÃ NGUỒN PYTHON (BOILERPLATE)
-│   ├── 📄 tools.py              <-- 🛠️ [Role 2] Khai báo các công cụ (Tools)
+├── 📁 src/                      <-- 💻 MÃ NGUỒN PYTHON
+│   ├── 📄 tools.py              <-- 🛠️ [Role 2] 5 công cụ (Tools) đọc/ghi dữ liệu thật
 │   ├── 📄 prompts.py            <-- 🧠 [Role 3] ReAct System Prompt & Guardrails
-│   └── 📄 app.py                <-- 🚀 [Role 4] Core App ghép nối & chạy ReAct Loop
+│   ├── 📄 app.py                <-- 🚀 [Role 4] Core App: vòng lặp ReAct + Web server
+│   ├── 📄 providers.py          <-- 🔌 [Role 4] Multi-provider adapter (NIM/Groq/OpenAI/Mock)
+│   ├── 📄 run_eval.py           <-- 📊 [Role 5] Chạy toàn bộ test case & tự chấm rubric 0-2
+│   └── 📁 frontend/             <-- 🖥️ Giao diện web chat (index.html, script.js, style.css)
 │
 └── 📁 docs/                     <-- 📚 TÀI LIỆU HƯỚNG DẪN & BÁO CÁO
     ├── 📄 CODELAB.md            <-- 🎓 [LMS Format] Hướng dẫn thực hành từng bước Codelab
     ├── 📄 PHAN_CONG_CONG_VIEC.md <-- 📋 [BẮT ĐẦU TẠI ĐÂY] Sổ tay thực hành & Checklist 5 Roles
     ├── 📄 DANH_SACH_DE_TAI.md    <-- 💡 Danh sách 10 chủ đề gợi ý
-    └── 📄 trace_eval.md          <-- 📊 [Role 5] Báo cáo Log Trace & Đánh giá Agentic Fit
+    ├── 📄 trace_eval.md          <-- 📊 [Role 5] Báo cáo Log Trace, Scoring Matrix & Rubric 0-2
+    ├── 📄 hybrid_flowchart.mermaid <-- 🔀 [Role 5B] Sơ đồ phân luồng Chatbot vs Agent
+    ├── 📄 HUONG_DAN_DEMO.md      <-- 🎬 Kịch bản demo 5 phút & xử lý sự cố
+    └── 📄 BAN_GIAO_NHIEM_VU.md   <-- 🤝 Bản giao việc chi tiết cho từng Role
+```
+
+### 🚀 Chạy nhanh
+
+```bash
+python -m venv .venv && .venv\Scripts\Activate.ps1   # macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+copy .env.example .env                                # rồi điền LLM_API_KEY
+
+python config\generate_listings.py --stats            # sinh 10.000 căn (đã commit sẵn)
+python config\generate_bookings.py                    # sinh lịch hẹn có sẵn
+python src\tools.py                                   # unit test tool: 20/20 pass
+python src\app.py                                     # mở web app
+python src\run_eval.py --out docs\rubric.md           # chạy 13 case & tự chấm điểm
 ```
 
 ---

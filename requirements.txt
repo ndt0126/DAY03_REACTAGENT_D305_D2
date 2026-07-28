@@ -1,7 +1,29 @@
-google-genai
+# =============================================================================
+# 📦 THƯ VIỆN BẮT BUỘC
+# Đủ để chạy toàn bộ Lab với NVIDIA NIM, Groq, Together, DeepSeek, Ollama,
+# OpenAI — tức mọi endpoint tương thích chuẩn OpenAI (LLM_PROVIDER=custom),
+# và cả chế độ offline (LLM_PROVIDER=mock).
+# =============================================================================
+flask
 openai
-anthropic
 python-dotenv
 requests
-flask
 
+
+# =============================================================================
+# 🔌 TUỲ CHỌN — CHỈ CÀI NẾU DÙNG SDK RIÊNG CỦA HÃNG
+# -----------------------------------------------------------------------------
+# Bỏ dấu # ở đầu dòng tương ứng rồi cài lại:
+#   LLM_PROVIDER=gemini     -> cần google-genai
+#   LLM_PROVIDER=anthropic  -> cần anthropic
+#
+# ⚠️ Lý do mặc định TẮT: google-genai kéo theo phiên bản `websockets` mới, rất
+#    hay xung đột với gói cũ trong Python toàn cục trên Windows. Khi xung đột,
+#    pip rollback TOÀN BỘ giao dịch -> flask cũng không được cài theo.
+#    Nếu vẫn muốn dùng, hãy cài trong virtual environment sạch.
+#
+# ✅ Không cài hai gói này KHÔNG làm gãy code: providers.py import chúng bên
+#    trong hàm và có bắt lỗi, chỉ hiện thông báo lịch sự nếu thiếu.
+# =============================================================================
+# google-genai
+# anthropic

@@ -24,14 +24,23 @@ if sys.stdout.encoding != 'utf-8':
 
 # Import các thành phần từ file của Role 2, Role 3 & Multi-Provider Adapter
 from tools import (
-    AVAILABLE_TOOLS, 
-    SAMPLE_APARTMENTS,
-    search_apartments, 
-    get_apartment_details, 
-    book_viewing_schedule, 
-    check_schedule_status
+    AVAILABLE_TOOLS,
+    get_sample_listings,
+    get_all_bookings,
+    search_listings,
+    get_listing_details,
+    check_viewing_slots,
+    book_viewing,
+    list_bookings,
 )
-from prompts import CHATBOT_BASELINE_PROMPT, REACT_SYSTEM_PROMPT, MAX_ITERATIONS
+from prompts import (
+    CHATBOT_BASELINE_PROMPT,
+    REACT_SYSTEM_PROMPT,
+    MAX_ITERATIONS,
+    MAX_REPEATED_ACTIONS,
+    STOP_SEQUENCES,
+    FALLBACK_MESSAGE,
+)
 from providers import get_llm_provider
 
 load_dotenv()
@@ -142,43 +151,174 @@ def execute_tool(action_name: str, args: list) -> str:
         return f"LỖI XỬ LÝ TOOL {action_name}: {str(e)}"
 
 
-def run_baseline_chatbot(user_query: str, provider=None):
+# =========================================================
+# 🧠 BỘ NHỚ HỘI THOẠI — giải bài toán "khách không biết UUID"
+# =========================================================
+
+# UUID của căn hộ, dùng để moi lại mã căn đã xuất hiện ở các lượt chat trước
+_UUID_RE = re.compile(
+    r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)
+
+MAX_HISTORY_TURNS = 6        # số lượt chat gần nhất được đưa vào ngữ cảnh
+MAX_CONTEXT_LISTINGS = 8     # số căn gần nhất được nhắc lại cho Agent
+
+
+def build_conversation_context(history) -> str:
+    """Dựng khối ngữ cảnh từ lịch sử chat để Agent tự tra ra mã căn.
+
+    ═══ VÌ SAO CẦN HÀM NÀY? ═══
+    Mã căn là UUID 36 ký tự. Khách hàng KHÔNG BAO GIỜ biết và không thể gõ ra.
+    Trong thực tế khách chỉ nói "đặt lịch xem căn đầu tiên" hoặc "căn ở Xuân Thủy".
+
+    Nếu mỗi lượt chat đều bắt đầu từ con số 0, Agent buộc phải hỏi khách mã căn
+    (bất khả thi) hoặc tự bịa ra mã (ảo giác). Hàm này gom lại các căn đã xuất
+    hiện ở những lượt trước, kèm mã UUID đầy đủ, để Agent đối chiếu.
+
+    Args:
+        history (list): [{"role": "user"|"assistant", "content": str}, ...]
+
+    Returns:
+        str: Khối ngữ cảnh chèn vào đầu transcript, hoặc "" nếu chưa có lịch sử.
     """
-    Dựng Chatbot gốc (Baseline) không có công cụ.
+    if not history:
+        return ""
+
+    turns = [h for h in history if isinstance(h, dict) and h.get("content")]
+    turns = turns[-MAX_HISTORY_TURNS * 2:]
+    if not turns:
+        return ""
+
+    lines = ["=== LỊCH SỬ HỘI THOẠI TRƯỚC ĐÓ ==="]
+    for h in turns:
+        who = "Khách" if h.get("role") == "user" else "Trợ lý"
+        content = str(h["content"]).strip().replace("\n", " ")
+        if len(content) > 400:
+            content = content[:400] + "..."
+        lines.append(f"{who}: {content}")
+
+    # Moi toàn bộ UUID đã từng xuất hiện, khử trùng lặp nhưng GIỮ THỨ TỰ
+    # (thứ tự quan trọng: khách nói "căn đầu tiên" là căn nào)
+    seen, uuids = set(), []
+    for h in turns:
+        for u in _UUID_RE.findall(str(h["content"])):
+            ul = u.lower()
+            if ul not in seen:
+                seen.add(ul)
+                uuids.append(ul)
+
+    if uuids:
+        lines.append("")
+        lines.append("=== CÁC CĂN ĐÃ ĐỀ CẬP TRONG HỘI THOẠI (dùng mã này, ĐỪNG hỏi khách) ===")
+        # Bổ sung địa chỉ + giá từ dữ liệu thật để Agent đối chiếu khi khách nói
+        # "căn ở Xuân Thủy" hay "căn rẻ nhất"
+        for i, u in enumerate(uuids[-MAX_CONTEXT_LISTINGS:], 1):
+            info = get_listing_brief(u)
+            lines.append(f"{i}. {u}" + (f" — {info}" if info else ""))
+
+    lines.append("=== HẾT PHẦN LỊCH SỬ ===\n")
+    return "\n".join(lines)
+
+
+def get_listing_brief(ma_can: str) -> str:
+    """Lấy mô tả ngắn của một căn để đính kèm vào ngữ cảnh hội thoại."""
+    try:
+        from tools import _load_listings
+        item = _load_listings().get(ma_can)
+        if not item:
+            return ""
+        return f"{item['dia_chi']}, {item['quan']} | {item['gia']:,} VNĐ/tháng | {item['dien_tich']}m2"
+    except Exception:
+        return ""
+
+
+def run_baseline_chatbot(user_query: str, provider=None, history=None):
+    """
+    Dựng Chatbot gốc (Baseline) không có công cụ: ĐÚNG 1 lần gọi LLM, 0 tool call.
     """
     if provider is None:
         provider = get_llm_provider()
-        
-    response = provider.generate(user_query, system_prompt=CHATBOT_BASELINE_PROMPT)
+
+    # Baseline cũng được cấp lịch sử hội thoại để so sánh CÔNG BẰNG với Agent.
+    # Khác biệt duy nhất giữa hai hệ thống phải là CÓ/KHÔNG CÓ TOOL, không phải trí nhớ.
+    prompt = user_query
+    if history:
+        turns = [h for h in history if isinstance(h, dict) and h.get("content")][-MAX_HISTORY_TURNS * 2:]
+        if turns:
+            hist = "\n".join(
+                f"{'Khách' if h.get('role') == 'user' else 'Trợ lý'}: {str(h['content'])[:400]}"
+                for h in turns)
+            prompt = f"=== LỊCH SỬ HỘI THOẠI ===\n{hist}\n=== HẾT ===\n\nKhách hỏi: {user_query}"
+
+    response = provider.generate(prompt, system_prompt=CHATBOT_BASELINE_PROMPT)
     return {
         "mode": "baseline",
         "user_query": user_query,
         "final_answer": response,
         "steps": [],
         "total_steps": 0,
-        "guardrail_triggered": False
+        "tool_calls": 0,
+        "guardrail_triggered": False,
+        "stop_reason": "single_llm_call"
     }
 
 
-def run_react_agent(user_query: str, provider=None):
-    """
-    Dựng vòng lặp ReAct Agent (Thought -> Action -> Observation) có Guardrails và Trace Log.
+def run_react_agent(user_query: str, provider=None, history=None):
+    """Vòng lặp ReAct thật: LLM -> parse -> chạy Tool -> chèn Observation -> lặp.
+
+    ═══ 4 BƯỚC MỖI VÒNG LẶP ═══
+      [1] CALL LLM  — gửi transcript + stop sequence để LLM PHẢI dừng sau dòng Action
+      [2] PARSE     — bóc `Action: ten_tool[args]` hoặc `Final Answer:`
+      [3] EXECUTE   — tra AVAILABLE_TOOLS, gọi hàm Python THẬT
+      [4] APPEND    — ỨNG DỤNG chèn `Observation: <kết quả thật>`, KHÔNG phải LLM
+
+    ═══ 3 LỚP GUARDRAIL ═══
+      • STOP_SEQUENCES       — chặn LLM tự bịa dòng Observation (phòng tuyến 1)
+      • MAX_REPEATED_ACTIONS — phát hiện Agent kẹt lặp cùng một Action
+      • MAX_ITERATIONS       — trần cứng, chi phí luôn có giới hạn
+
+    Args:
+        history (list): lịch sử chat [{"role","content"}], để Agent tự tra ra mã căn
+                        UUID đã xuất hiện ở lượt trước mà không phải hỏi khách.
     """
     if provider is None:
         provider = get_llm_provider()
-        
+
     steps_log = []
-    current_prompt = f"User Request: {user_query}"
-    step = 0
+    tool_calls = 0
+    llm_calls = 0
+    action_history = []
     final_answer = None
     guardrail_triggered = False
+    stop_reason = None
 
-    while step < MAX_ITERATIONS:
-        step += 1
-        llm_response = provider.generate(current_prompt, system_prompt=REACT_SYSTEM_PROMPT)
-        
+    # Transcript = BỘ NHỚ LÀM VIỆC của Agent. Mỗi vòng nó dài thêm một khối
+    # Thought/Action/Observation và được gửi lại nguyên vẹn ở vòng sau.
+    context_block = build_conversation_context(history)
+    transcript = f"{context_block}Question: {user_query}\n"
+
+    for step in range(1, MAX_ITERATIONS + 1):
+        # ---------- [1] CALL LLM ----------
+        llm_response = provider.generate(
+            transcript,
+            system_prompt=REACT_SYSTEM_PROMPT,
+            stop=STOP_SEQUENCES,          # 🛡️ GUARDRAIL 1
+        )
+        llm_calls += 1
+
+        # Provider lỗi (sai key, mất mạng...) -> dừng ngay, không đốt thêm vòng lặp
+        if llm_response and llm_response.lstrip().startswith("[") and \
+                any(t in llm_response[:40] for t in ("Error", "Exception")):
+            stop_reason = "provider_error"
+            final_answer = f"Không gọi được LLM. Chi tiết: {llm_response}"
+            steps_log.append({"step": step, "raw_response": llm_response,
+                              "thought": "", "action": None, "action_name": None,
+                              "args": [], "observation": None,
+                              "final_answer": final_answer, "error": True})
+            break
+
+        # ---------- [2] PARSE ----------
         thought, action_name, args, parsed_final = parse_action_call(llm_response)
-        
+
         step_record = {
             "step": step,
             "raw_response": llm_response,
@@ -187,34 +327,63 @@ def run_react_agent(user_query: str, provider=None):
             "action_name": action_name,
             "args": args,
             "observation": None,
-            "final_answer": parsed_final
+            "final_answer": None,
         }
-        
-        if parsed_final:
+
+        # ---------- [2a] LLM đã chốt câu trả lời ----------
+        if parsed_final and action_name is None:
             final_answer = parsed_final
-            steps_log.append(step_record)
-            break
-            
-        if action_name:
-            observation = execute_tool(action_name, args)
-            step_record["observation"] = observation
-            steps_log.append(step_record)
-            
-            # Cập nhật prompt với Observation cho bước suy luận tiếp theo
-            current_prompt += f"\n\nThought: {thought}\nAction: {action_name}{args}\nObservation: {observation}\nThought:"
-        else:
-            # Không parse được action hay final answer
-            final_answer = llm_response
+            stop_reason = "final_answer"
             step_record["final_answer"] = final_answer
             steps_log.append(step_record)
             break
 
-    if step >= MAX_ITERATIONS and not final_answer:
+        # ---------- [2b] Không parse được ----------
+        # ⚠️ KHÔNG lấy text rác làm Final Answer (đó là đường để ảo giác lọt ra
+        # thẳng cho người dùng). Thay vào đó dạy lại định dạng qua Observation.
+        if action_name is None:
+            hint = ("LỖI ĐỊNH DẠNG: Không tìm thấy dòng 'Action:' hoặc 'Final Answer:'. "
+                    "Hãy xuất lại đúng mẫu: 'Action: ten_tool[\"tham_so\"]' "
+                    "hoặc 'Final Answer: <câu trả lời>'.")
+            step_record["observation"] = hint
+            step_record["parse_error"] = True
+            steps_log.append(step_record)
+            transcript += f"{llm_response}\nObservation: {hint}\n"
+            continue
+
+        # ---------- 🛡️ GUARDRAIL 2: Repeated Action ----------
+        signature = f"{action_name}({', '.join(map(str, args))})"
+        if action_history.count(signature) >= MAX_REPEATED_ACTIONS:
+            guardrail_triggered = True
+            stop_reason = "repeated_action"
+            final_answer = FALLBACK_MESSAGE
+            step_record["observation"] = (
+                f"🛡️ GUARDRAIL: Action '{signature}' đã lặp lại {MAX_REPEATED_ACTIONS} lần "
+                f"mà không tiến triển. Ngắt vòng lặp an toàn.")
+            step_record["final_answer"] = final_answer
+            steps_log.append(step_record)
+            break
+        action_history.append(signature)
+
+        # ---------- [3] EXECUTE — chạy hàm Python THẬT ----------
+        observation = execute_tool(action_name, args)
+        tool_calls += 1
+        step_record["observation"] = observation
+        step_record["is_error"] = str(observation).startswith("LỖI")
+        steps_log.append(step_record)
+
+        # ---------- [4] APPEND — ứng dụng chèn Observation ----------
+        transcript += (f"Thought: {thought}\n"
+                       f"Action: {action_name}[{', '.join(map(str, args))}]\n"
+                       f"Observation: {observation}\n")
+
+    # ---------- 🛡️ GUARDRAIL 3: hết ngân sách vòng lặp ----------
+    if final_answer is None:
         guardrail_triggered = True
+        stop_reason = "max_iterations"
         final_answer = (
-            f"🛡️ PHANH AN TOÀN (GUARDRAIL TRIGGERED): Đã đạt giới hạn tối đa {MAX_ITERATIONS} bước suy luận. "
-            f"Hệ thống tạm ngắt lặp để đảm bảo an toàn. Vui lòng làm rõ thông tin hoặc thử lại!"
-        )
+            f"🛡️ PHANH AN TOÀN: Đã chạm giới hạn {MAX_ITERATIONS} bước suy luận mà chưa "
+            f"có câu trả lời chắc chắn.\n\n{FALLBACK_MESSAGE}")
 
     return {
         "mode": "react",
@@ -222,7 +391,11 @@ def run_react_agent(user_query: str, provider=None):
         "final_answer": final_answer,
         "steps": steps_log,
         "total_steps": len(steps_log),
-        "guardrail_triggered": guardrail_triggered
+        "llm_calls": llm_calls,
+        "tool_calls": tool_calls,
+        "stop_reason": stop_reason,
+        "guardrail_triggered": guardrail_triggered,
+        "transcript": transcript,
     }
 
 
@@ -261,21 +434,50 @@ def api_get_tools():
 
 @app.route("/api/listings", methods=["GET"])
 def api_get_listings():
-    """Trả về danh sách phòng trọ mẫu cho UI preview"""
-    return jsonify(SAMPLE_APARTMENTS)
+    """Trả về vài căn đầu tiên từ listings.txt cho UI preview (không phải toàn bộ 10.000 căn)"""
+    return jsonify(get_sample_listings(50))
+
+
+@app.route("/api/bookings", methods=["GET"])
+def api_get_bookings():
+    """Trả về danh sách lịch hẹn xem nhà hiện có trong bookings.txt"""
+    return jsonify(get_all_bookings())
 
 @app.route("/api/providers", methods=["GET"])
 def api_get_providers():
-    """Trả về danh sách các LLM Provider hỗ trợ"""
-    active_env_provider = (os.getenv("LLM_PROVIDER") or "mock").lower().strip()
+    """Trả về danh sách các LLM Provider hỗ trợ.
+
+    ⚠️ BÀI HỌC TỪ MỘT BUG THẬT: trước đây danh sách này thiếu option "custom".
+    Khi .env đặt LLM_PROVIDER=custom, không option nào được đánh dấu active,
+    dropdown tự chọn option ĐẦU TIÊN (mock), rồi frontend gửi provider="mock"
+    lên /api/chat — GHI ĐÈ hoàn toàn cấu hình .env. Kết quả: người dùng tưởng
+    đang chạy NVIDIA NIM nhưng thực chất chạy MockProvider offline.
+    => Danh sách phải luôn chứa provider đang cấu hình trong .env.
+    """
+    env_provider = (os.getenv("LLM_PROVIDER") or "mock").lower().strip()
+    model = os.getenv("LLM_MODEL") or "mặc định"
+
+    # Mọi endpoint tương thích OpenAI đều quy về một id chung là "custom"
+    compatible = {"custom", "compatible", "nvidia", "nim", "nvidia_nim",
+                  "groq", "together", "deepseek", "ollama", "vllm"}
+    canonical = "custom" if env_provider in compatible else env_provider
+
     providers = [
-        {"id": "mock", "name": "Offline Mock Mode", "active": active_env_provider == "mock"},
-        {"id": "gemini", "name": "Google Gemini", "active": active_env_provider == "gemini"},
-        {"id": "openai", "name": "OpenAI (GPT-4o)", "active": active_env_provider == "openai"},
-        {"id": "anthropic", "name": "Anthropic Claude", "active": active_env_provider == "anthropic"},
-        {"id": "openrouter", "name": "OpenRouter API", "active": active_env_provider == "openrouter"}
+        {"id": "custom", "name": f"⚙️ Endpoint theo .env ({model})"},
+        {"id": "mock", "name": "🧪 Offline Mock (không cần API key)"},
+        {"id": "gemini", "name": "Google Gemini"},
+        {"id": "openai", "name": "OpenAI"},
+        {"id": "anthropic", "name": "Anthropic Claude"},
+        {"id": "openrouter", "name": "OpenRouter"},
     ]
-    return jsonify({"providers": providers, "current": active_env_provider})
+    for p in providers:
+        p["active"] = (p["id"] == canonical)
+
+    # Lưới an toàn: luôn phải có đúng một option được chọn sẵn
+    if not any(p["active"] for p in providers):
+        providers[0]["active"] = True
+
+    return jsonify({"providers": providers, "current": canonical, "model": model})
 
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
@@ -284,16 +486,19 @@ def api_chat():
     user_query = data.get("query", "").strip()
     mode = data.get("mode", "react").lower()
     provider_name = data.get("provider", None)
-    
+    # Lịch sử hội thoại do frontend gửi lên — nhờ nó Agent mới tra được mã căn UUID
+    # từ các lượt chat trước thay vì phải hỏi khách (khách không thể biết UUID).
+    history = data.get("history", []) or []
+
     if not user_query:
         return jsonify({"error": "Nội dung câu hỏi không được để trống"}), 400
-        
+
     provider = get_llm_provider(provider_name)
-    
+
     if mode == "baseline":
-        res = run_baseline_chatbot(user_query, provider)
+        res = run_baseline_chatbot(user_query, provider, history=history)
     else:
-        res = run_react_agent(user_query, provider)
+        res = run_react_agent(user_query, provider, history=history)
         
     res["provider"] = provider.__class__.__name__
     res["model"] = getattr(provider, "model_name", "Mock Model")

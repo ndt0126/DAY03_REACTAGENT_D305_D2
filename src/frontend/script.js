@@ -5,6 +5,9 @@
 document.addEventListener("DOMContentLoaded", () => {
     let currentMode = "react"; // 'react' hoặc 'baseline'
     let testCasesData = [];
+    // 🧠 Bộ nhớ hội thoại nhiều lượt. Bắt buộc phải có: mã căn là UUID 36 ký tự,
+    // khách không thể tự gõ, nên Agent phải lấy lại từ các lượt chat trước.
+    let conversationHistory = [];
 
     // DOM Elements
     const chatMessages = document.getElementById("chatMessages");
@@ -198,10 +201,13 @@ document.addEventListener("DOMContentLoaded", () => {
             const response = await fetch("/api/chat", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ 
-                    query: query, 
+                body: JSON.stringify({
+                    query: query,
                     mode: currentMode,
-                    provider: selectedProvider
+                    provider: selectedProvider,
+                    // Gửi kèm lịch sử hội thoại: đây là thứ giúp Agent tra ra mã căn
+                    // UUID từ các lượt trước thay vì phải hỏi khách (khách không biết UUID)
+                    history: conversationHistory
                 })
             });
             const data = await response.json();
@@ -210,6 +216,19 @@ document.addEventListener("DOMContentLoaded", () => {
             removeMessage(loadingId);
             appendAssistantMessage(data);
 
+            // Lưu lượt chat vào bộ nhớ hội thoại.
+            // ⚠️ Quan trọng: mã căn UUID nằm trong Observation của Tool chứ không
+            // phải lúc nào cũng có trong câu trả lời cuối. Vì vậy ta trích UUID từ
+            // toàn bộ Observation rồi đính kèm, đảm bảo lượt sau Agent vẫn thấy.
+            conversationHistory.push({ role: "user", content: query });
+            conversationHistory.push({
+                role: "assistant",
+                content: (data.final_answer || "") + collectListingIds(data)
+            });
+            // Giữ tối đa 12 lượt gần nhất để prompt không phình quá to
+            if (conversationHistory.length > 12) {
+                conversationHistory = conversationHistory.slice(-12);
+            }
 
         } catch (err) {
             removeMessage(loadingId);
@@ -220,6 +239,26 @@ document.addEventListener("DOMContentLoaded", () => {
             sendBtn.disabled = false;
         }
     });
+
+    /**
+     * Trích toàn bộ mã căn UUID xuất hiện trong các Observation của lượt vừa rồi.
+     * Nhờ vậy lượt chat sau, Agent vẫn biết "căn đầu tiên" / "căn rẻ nhất" là mã nào
+     * mà không phải hỏi khách — khách hàng không bao giờ biết UUID 36 ký tự.
+     */
+    function collectListingIds(data) {
+        if (!data || !Array.isArray(data.steps)) return "";
+        const re = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
+        const seen = [];
+        data.steps.forEach(s => {
+            const text = `${s.observation || ""} ${s.action || ""}`;
+            (text.match(re) || []).forEach(u => {
+                const ul = u.toLowerCase();
+                if (!seen.includes(ul)) seen.push(ul);
+            });
+        });
+        if (!seen.length) return "";
+        return "\n[Các căn đã tra cứu trong lượt này: " + seen.slice(0, 8).join(", ") + "]";
+    }
 
     function appendUserMessage(text) {
         const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -297,6 +336,25 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const finalBody = data.final_answer ? formatMarkdown(data.final_answer) : "";
 
+        // 🔍 Badge cho biết MODEL NÀO thật sự trả lời + telemetry.
+        // Bắt buộc phải hiện: đã từng có bug dropdown âm thầm ghi đè .env khiến
+        // hệ thống chạy MockProvider offline trong khi người dùng tưởng đang
+        // gọi NVIDIA NIM. Có badge này thì nhìn phát là biết ngay.
+        let metaHtml = "";
+        if (data.provider) {
+            const isMock = /mock/i.test(data.provider);
+            const label = isMock
+                ? `🧪 MOCK OFFLINE — KHÔNG gọi API thật`
+                : `⚙️ ${escapeHtml(data.model || data.provider)}`;
+            const tele = (data.mode === "react")
+                ? ` · ${data.tool_calls ?? 0} tool · ${data.llm_calls ?? 0} LLM · ${escapeHtml(data.stop_reason || "")}`
+                : ` · 0 tool · 1 LLM`;
+            metaHtml = `<div class="provider-badge" style="font-size:11px;opacity:.75;margin-bottom:6px;
+                        padding:3px 8px;border-radius:6px;display:inline-block;
+                        background:${isMock ? '#fee2e2' : '#dbeafe'};
+                        color:${isMock ? '#b91c1c' : '#1e3a8a'};">${label}${tele}</div>`;
+        }
+
         row.innerHTML = `
             <div class="avatar assistant-avatar">
                 <i class="fa-solid fa-robot"></i>
@@ -307,6 +365,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     <span class="time-stamp">${time}</span>
                 </div>
                 <div class="bubble-body">
+                    ${metaHtml}
                     ${traceHtml}
                     ${guardrailHtml ? guardrailHtml : `<div>${finalBody}</div>`}
                 </div>
@@ -342,6 +401,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Clear Chat
     clearChatBtn.addEventListener("click", () => {
+        conversationHistory = [];   // xoá luôn bộ nhớ hội thoại, không chỉ xoá giao diện
         chatMessages.innerHTML = `
             <div class="message-row assistant-row">
                 <div class="avatar assistant-avatar">
