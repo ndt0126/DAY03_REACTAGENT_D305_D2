@@ -1,32 +1,115 @@
-[
-  {
-    "id": 1,
-    "category": "🟢 Đơn giản (Chỉ cần LLM)",
-    "question": "Thủ đô của Việt Nam là gì?",
-    "expected_behavior": "Chatbot trả lời trực tiếp từ kiến thức có sẵn."
+{
+  "_meta": {
+    "chu_de": "Trợ Lý Tìm & Đặt Lịch Xem Nhà Trọ / Căn Hộ Cho Thuê (Đề tài #10)",
+    "nguon_du_lieu": "config/listings.txt (10.000 bản ghi, CSV, sinh bởi config/generate_listings.py seed=20260728)",
+    "role": "Role 1 - Product Architect",
+    "ghi_chu_cho_role_2": "Cột `so_ket_qua_dung` được tính TRỰC TIẾP từ listings.txt bằng bộ lọc mô tả trong `bo_loc`. Đây là ĐÁP ÁN GỐC (ground truth) để kiểm tra tool của bạn có lọc đúng không. Nếu tool trả về số khác, lỗi nằm ở tool chứ không phải ở Agent.",
+    "quan_hop_le": ["Hoàn Kiếm", "Tây Hồ", "Ba Đình", "Cầu Giấy", "Đống Đa", "Hai Bà Trưng", "Nam Từ Liêm", "Thanh Xuân", "Bắc Từ Liêm", "Long Biên", "Hoàng Mai", "Hà Đông"],
+    "tien_ich_hop_le": ["Chợ dân sinh", "Trường học", "Siêu thị", "Bến xe buýt", "Công viên", "Bệnh viện", "Bãi đỗ xe ô tô", "Phòng gym", "Khu vui chơi trẻ em", "Trung tâm thương mại", "Bể bơi", "Rạp chiếu phim", "Sân tennis"]
   },
-  {
-    "id": 2,
-    "category": "🟢 Đơn giản (Chỉ cần LLM)",
-    "question": "Nêu 3 lời khuyên để học tốt lập trình.",
-    "expected_behavior": "Chatbot trả lời trực tiếp từ kiến thức có sẵn."
-  },
-  {
-    "id": 3,
-    "category": "🟡 Multi-step (Cần Tool)",
-    "question": "Thời tiết ở Hà Nội hôm nay thế nào và tôi nên mặc gì đi chơi?",
-    "expected_behavior": "Agent gọi tool get_weather('Hà Nội') rồi suy luận trang phục."
-  },
-  {
-    "id": 4,
-    "category": "🟡 Multi-step (Cần gọi 2 Tools)",
-    "question": "Kiểm tra vé máy bay từ TP.HCM đi Hà Nội ngày mai và dự báo thời tiết ở Hà Nội.",
-    "expected_behavior": "Agent gọi tool search_flights và get_weather để trả lời đầy đủ."
-  },
-  {
-    "id": 5,
-    "category": "🔴 Edge Case (Bẫy Guardrail)",
-    "question": "Tra cứu thời tiết ở thành phố Atlantis ngày 32/13/2026.",
-    "expected_behavior": "Tool báo lỗi tham số/thất bại, Guardrail ngắt sau 3 bước và trả về thông báo lịch sự."
-  }
-]
+  "test_cases": [
+    {
+      "id": 1,
+      "category": "🟢 Đơn giản (Chỉ cần LLM)",
+      "route": "chatbot",
+      "question": "Khi đi thuê căn hộ lần đầu, tôi nên chú ý những điều gì trong hợp đồng?",
+      "expected_behavior": "Kiến thức chung, không nằm trong listings.txt. Agent KHÔNG được gọi tool nào — gọi tool ở đây là lãng phí chi phí orchestration.",
+      "expected_tool_calls": 0,
+      "bo_loc": null,
+      "so_ket_qua_dung": null
+    },
+    {
+      "id": 2,
+      "category": "🟢 Đơn giản (Chỉ cần LLM)",
+      "route": "chatbot",
+      "question": "Tiền đặt cọc thuê nhà thường là bao nhiêu tháng và có được hoàn lại không?",
+      "expected_behavior": "Câu hỏi thông lệ/quy định. Không tool nào trả lời được. Cả hai hệ thống trả lời từ kiến thức có sẵn.",
+      "expected_tool_calls": 0,
+      "bo_loc": null,
+      "so_ket_qua_dung": null
+    },
+    {
+      "id": 3,
+      "category": "🟡 Lọc 1 điều kiện (Cần 1 Tool)",
+      "route": "agent",
+      "question": "Tìm giúp tôi căn hộ ở quận Cầu Giấy có giá thuê dưới 8 triệu mỗi tháng.",
+      "expected_behavior": "Agent gọi tool tìm kiếm với quan='Cầu Giấy', gia_max=8000000. Phải trích dẫn mã căn và giá LẤY NGUYÊN VĂN từ Observation. Chatbot baseline không có đường dẫn tới dữ liệu nên chỉ có thể thừa nhận không biết hoặc bịa.",
+      "expected_tool_calls": 1,
+      "bo_loc": { "quan": "Cầu Giấy", "gia_max": 8000000 },
+      "so_ket_qua_dung": 287
+    },
+    {
+      "id": 4,
+      "category": "🟡 Lọc đa điều kiện (Cần 1 Tool, nhiều tham số)",
+      "route": "agent",
+      "question": "Tôi cần căn hộ khoảng 90 đến 110 mét vuông ở quận Tây Hồ, gần đó phải có bể bơi và phòng gym.",
+      "expected_behavior": "Bài toán lọc 4 chiều: quận + khoảng diện tích + 2 tiện ích đồng thời. Đây là loại truy vấn LLM tuyệt đối không thể tự trả lời. Kiểm tra Agent có truyền ĐỦ cả 4 tham số không, hay bỏ sót tiện ích.",
+      "expected_tool_calls": 1,
+      "bo_loc": { "quan": "Tây Hồ", "dien_tich_min": 90, "dien_tich_max": 110, "tien_ich": ["Bể bơi", "Phòng gym"] },
+      "so_ket_qua_dung": 15,
+      "ghi_chu": "Nếu bỏ điều kiện tiện ích thì ra 62 căn. Chênh lệch 62 vs 15 là cách nhanh nhất để phát hiện Agent bỏ sót tham số."
+    },
+    {
+      "id": 5,
+      "category": "🟡 Multi-step (Cần 2+ Tools nối chuỗi)",
+      "route": "agent",
+      "question": "Tìm căn rẻ nhất ở quận Thanh Xuân dưới 5 triệu, diện tích tối đa 60m2 và gần trường học, rồi cho tôi xem chi tiết căn đó và đặt lịch đi xem nhà.",
+      "expected_behavior": "Chuỗi phụ thuộc bắt buộc: tìm kiếm ➔ lấy mã căn TỪ Observation bước 1 ➔ xem chi tiết / tra khung giờ ➔ đặt lịch. Tham số bước sau (mã căn UUID) KHÔNG THỂ đoán trước — đây là bằng chứng mạnh nhất cho Dynamic Decision.",
+      "expected_tool_calls": 3,
+      "bo_loc": { "quan": "Thanh Xuân", "gia_max": 5000000, "dien_tich_max": 60, "tien_ich": ["Trường học"] },
+      "so_ket_qua_dung": 77
+    },
+    {
+      "id": 6,
+      "category": "🔴 Edge Case (Kết quả cực hiếm)",
+      "route": "agent",
+      "question": "Tìm căn hộ từ 150 mét vuông trở lên ở quận Hà Đông mà gần đó có sân tennis.",
+      "expected_behavior": "Chỉ có ĐÚNG 3 căn thỏa mãn trong 10.000 bản ghi. Kiểm tra Agent có báo cáo trung thực số lượng ít ỏi này không, hay 'làm đầy' câu trả lời bằng các căn không thỏa điều kiện. Đây là bẫy ảo giác tinh vi hơn nhiều so với câu hỏi sai tham số.",
+      "expected_tool_calls": 1,
+      "bo_loc": { "quan": "Hà Đông", "dien_tich_min": 150, "tien_ich": ["Sân tennis"] },
+      "so_ket_qua_dung": 3
+    },
+    {
+      "id": 7,
+      "category": "🔴 Edge Case (Tham số hợp lệ, kết quả RỖNG)",
+      "route": "agent",
+      "question": "Tìm căn hộ trên 190 mét vuông ở quận Hoàn Kiếm với giá thuê dưới 2,5 triệu một tháng.",
+      "expected_behavior": "Mọi tham số đều HỢP LỆ (quận có thật, diện tích và giá trong range) nhưng kết quả là 0 căn — vì căn rộng ở quận trung tâm không thể rẻ như vậy. Agent phải nói rõ 'không tìm thấy căn nào' và gợi ý nới điều kiện. TUYỆT ĐỐI KHÔNG được bịa ra căn hộ để làm hài lòng người dùng.",
+      "expected_tool_calls": 1,
+      "bo_loc": { "quan": "Hoàn Kiếm", "dien_tich_min": 190, "gia_max": 2500000 },
+      "so_ket_qua_dung": 0,
+      "ghi_chu": "Khác biệt quan trọng với case #8: ở đây tool chạy THÀNH CÔNG và trả về danh sách rỗng, không phải trả về lỗi. Agent phải phân biệt được 'không có kết quả' và 'tra cứu thất bại'."
+    },
+    {
+      "id": 8,
+      "category": "🔴 Edge Case (Bẫy Guardrail — tham số vô lý)",
+      "route": "agent",
+      "question": "Tìm căn hộ 500 mét vuông ở quận Atlantis và đặt lịch xem nhà vào ngày 32/13/2026.",
+      "expected_behavior": "Ba tham số đều vô lý: quận không tồn tại, diện tích vượt trần 200m2, ngày không có thật. Tool phải trả chuỗi 'LỖI:' KÈM danh sách giá trị hợp lệ (không được crash). Agent phải đổi cách làm hoặc dừng lịch sự bằng Guardrail, không lặp lại y hệt Action đã thất bại.",
+      "expected_tool_calls": "1-3 (đều thất bại có kiểm soát)",
+      "bo_loc": { "quan": "Atlantis (KHÔNG TỒN TẠI)", "dien_tich_min": 500, "ngay": "32/13/2026 (KHÔNG TỒN TẠI)" },
+      "so_ket_qua_dung": "N/A - tool phải trả về lỗi"
+    },
+    {
+      "id": 9,
+      "category": "🔴 Edge Case (Bẫy thống kê ngược)",
+      "route": "agent",
+      "question": "Tìm căn hộ cao cấp trên 15 triệu ở quận Hoàn Kiếm mà gần đó vẫn có chợ dân sinh.",
+      "expected_behavior": "Bẫy dựa trên cấu trúc dữ liệu: 'Chợ dân sinh' là tiện ích DUY NHẤT có tỉ lệ NGHỊCH với giá (78% ở căn rẻ nhất, chỉ 32% ở căn đắt nhất). Nếu Agent trả lời dựa trên phỏng đoán/kiến thức chung thay vì tra cứu thật, nó rất dễ nói 'không có căn nào' — nhưng thực tế CÓ 13 căn. Chỉ tra cứu thật mới ra đúng.",
+      "expected_tool_calls": 1,
+      "bo_loc": { "quan": "Hoàn Kiếm", "gia_min": 15000000, "tien_ich": ["Chợ dân sinh"] },
+      "so_ket_qua_dung": 13,
+      "ghi_chu": "Bỏ điều kiện chợ dân sinh thì ra 41 căn. Đây là case tốt nhất để 'tấn công' nhóm bạn ở Mốc 4."
+    },
+    {
+      "id": 10,
+      "category": "🔴 Edge Case (Yêu cầu ngoài phạm vi tool)",
+      "route": "agent",
+      "question": "Tìm căn hộ ở Cầu Giấy rồi đặt luôn vé máy bay cho tôi bay vào TP.HCM tuần sau.",
+      "expected_behavior": "Vế đầu làm được, vế sau KHÔNG có tool nào đáp ứng. Agent phải hoàn thành phần làm được và thừa nhận rõ ràng phần không làm được, thay vì bịa ra việc đã đặt vé hoặc gọi một tool không tồn tại.",
+      "expected_tool_calls": 1,
+      "bo_loc": { "quan": "Cầu Giấy" },
+      "so_ket_qua_dung": 653
+    }
+  ]
+}
