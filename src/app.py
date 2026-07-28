@@ -81,6 +81,18 @@ def parse_action_call(response_text: str):
     args = []
     final_answer = None
 
+    # 🛡️ Ép về str trước mọi thao tác regex.
+    # Reasoning model (gpt-oss, o1, deepseek-r1...) có thể trả `message.content = None`
+    # khi chỉ sinh phần suy luận nội bộ. Nếu để None lọt tới re.search thì crash
+    # TypeError giữa chừng và mất trắng cả lần chạy đánh giá.
+    if response_text is None:
+        response_text = ""
+    elif not isinstance(response_text, str):
+        response_text = str(response_text)
+
+    if not response_text.strip():
+        return "", None, [], None
+
     # Tìm Thought
     thought_match = re.search(r'Thought:\s*(.*?)(?=\nAction:|\nFinal Answer:|$)', response_text, re.DOTALL)
     if thought_match:
@@ -290,6 +302,8 @@ def run_react_agent(user_query: str, provider=None, history=None):
     final_answer = None
     guardrail_triggered = False
     stop_reason = None
+    empty_streak = 0        # số lần model trả rỗng LIÊN TIẾP
+    MAX_EMPTY_STREAK = 2    # rỗng 2 lần liền là bỏ cuộc, đừng đốt hết quota
 
     # Transcript = BỘ NHỚ LÀM VIỆC của Agent. Mỗi vòng nó dài thêm một khối
     # Thought/Action/Observation và được gửi lại nguyên vẹn ở vòng sau.
@@ -305,9 +319,41 @@ def run_react_agent(user_query: str, provider=None, history=None):
         )
         llm_calls += 1
 
-        # Provider lỗi (sai key, mất mạng...) -> dừng ngay, không đốt thêm vòng lặp
-        if llm_response and llm_response.lstrip().startswith("[") and \
-                any(t in llm_response[:40] for t in ("Error", "Exception")):
+        # 🛡️ Chuẩn hoá về str ngay tại nguồn. Reasoning model có thể trả None.
+        if llm_response is None:
+            llm_response = ""
+        elif not isinstance(llm_response, str):
+            llm_response = str(llm_response)
+
+        # Model trả về rỗng -> KHÔNG crash, coi như một lần lỗi và thử lại.
+        # Nếu rỗng liên tiếp thì MAX_ITERATIONS sẽ chặn, không lặp vô hạn.
+        if not llm_response.strip():
+            empty_streak += 1
+            hint = ("LỖI: Model trả về nội dung rỗng. Hãy xuất lại theo đúng định dạng "
+                    "'Thought: ...' rồi 'Action: ten_tool[\"tham_so\"]' hoặc 'Final Answer: ...'.")
+            steps_log.append({"step": step, "raw_response": "", "thought": "",
+                              "action": None, "action_name": None, "args": [],
+                              "observation": hint, "final_answer": None,
+                              "parse_error": True, "empty_response": True})
+
+            # Rỗng liên tiếp -> model đang bí thật, thử thêm chỉ tốn tiền vô ích
+            if empty_streak >= MAX_EMPTY_STREAK:
+                stop_reason = "empty_response"
+                final_answer = (
+                    f"Model trả về nội dung rỗng {empty_streak} lần liên tiếp nên hệ thống dừng lại.\n"
+                    f"Thường gặp với reasoning model (vd gpt-oss) khi phần suy luận ăn hết token.\n"
+                    f"Gợi ý: tăng max_tokens, hoặc đổi LLM_MODEL sang một model instruct "
+                    f"(vd meta/llama-3.3-70b-instruct).")
+                break
+
+            transcript += f"Observation: {hint}\n"
+            continue
+
+        empty_streak = 0    # có nội dung trở lại thì reset
+
+        # Provider lỗi (sai key, mất mạng, nội dung rỗng...) -> dừng ngay
+        if llm_response.lstrip().startswith("[") and \
+                any(t in llm_response[:40] for t in ("Error", "Exception", "Empty")):
             stop_reason = "provider_error"
             final_answer = f"Không gọi được LLM. Chi tiết: {llm_response}"
             steps_log.append({"step": step, "raw_response": llm_response,

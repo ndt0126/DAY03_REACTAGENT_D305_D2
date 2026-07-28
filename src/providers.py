@@ -50,7 +50,14 @@ def _apply_stop(text: str, stop: list = None) -> str:
 
     Đây là LỚP BẢO HIỂM THỨ HAI: một số provider không hỗ trợ stop natively
     (vd Gemini), và kể cả provider có hỗ trợ thì model vẫn có thể phớt lờ.
+
+    ⚠️ LUÔN trả về str, không bao giờ trả None. Reasoning model (gpt-oss, o1...)
+    có thể trả `message.content = None` khi chỉ sinh phần suy luận — nếu để None
+    lọt xuống thì regex parser trong app.py sẽ crash với TypeError.
     """
+    if text is None:
+        return ""
+    text = str(text)
     if not stop or not text:
         return text
     cut = len(text)
@@ -109,7 +116,26 @@ class CompatibleProvider(BaseLLMProvider):
                 max_tokens=1024,
                 stop=stop or None,
             )
-            return _apply_stop(response.choices[0].message.content, stop)
+            msg = response.choices[0].message
+            content = getattr(msg, "content", None)
+
+            # ⚠️ Reasoning model (gpt-oss, o1, deepseek-r1...) có thể trả content = None
+            # khi model chỉ sinh phần suy luận nội bộ. Thử vớt từ các trường phụ
+            # trước khi bỏ cuộc, thay vì để None lọt xuống làm crash parser.
+            if not content:
+                for alt in ("reasoning_content", "reasoning"):
+                    v = getattr(msg, alt, None)
+                    if v:
+                        content = v
+                        break
+            if not content:
+                finish = getattr(response.choices[0], "finish_reason", "?")
+                return (f"[LLM Empty]: Model '{self.model_name}' trả về nội dung rỗng "
+                        f"(finish_reason={finish}). Thường gặp ở reasoning model khi bị "
+                        f"cắt token. Thử tăng max_tokens hoặc đổi sang model instruct "
+                        f"(vd meta/llama-3.3-70b-instruct).")
+
+            return _apply_stop(content, stop)
         except Exception as e:
             return f"[LLM Exception @ {self.base_url}]: {str(e)}"
 
@@ -327,10 +353,22 @@ class MockProvider(BaseLLMProvider):
         last_obs = prompt.rsplit("Observation:", 1)[-1] if n_obs else ""
         # Dòng "Question:" là câu hỏi của lượt hiện tại (phần trước đó là lịch sử)
         user_line = prompt.rsplit("Question:", 1)[-1].split("\n")[0] if "Question:" in prompt else prompt
+        cur = user_line.lower()   # câu hỏi của lượt hiện tại, KHÔNG gồm lịch sử
+
+        # Mã căn có thể đến từ Observation lượt này HOẶC từ khối lịch sử hội thoại
+        uuids = self._UUID_RE.findall(prompt)
+        co_lich_su = "ĐÃ ĐỀ CẬP TRONG HỘI THOẠI" in prompt
+
+        # Khách đang nói về căn đã xem ở lượt trước ("căn đầu tiên", "căn đó", "vừa rồi").
+        # Nếu lịch sử đã có mã căn thì đây chắc chắn là yêu cầu tra cứu, dù câu hỏi
+        # không chứa tên quận hay động từ "tìm".
+        nhac_lai_can = co_lich_su and uuids and any(k in cur for k in [
+            "căn đầu tiên", "căn đó", "căn này", "căn thứ", "vừa rồi", "vừa nãy",
+            "danh sách", "chi tiết", "cái đầu", "số 1", "đầu tiên"])
 
         # Câu hỏi lý thuyết -> trả lời ngay, KHÔNG tiêu tốn tool.
-        # Cũng xét trên CÂU HỎI HIỆN TẠI, không xét cả lịch sử.
-        if not self._needs_lookup(user_line.lower()) and n_obs == 0:
+        # Xét trên CÂU HỎI HIỆN TẠI, không xét cả lịch sử.
+        if not self._needs_lookup(user_line.lower()) and not nhac_lai_can and n_obs == 0:
             return ("Thought: Câu hỏi này chỉ cần kiến thức chung, không tool nào tra cứu được "
                     "và cũng không cần thiết.\n"
                     "Final Answer: Bạn nên kiểm tra kỹ điều khoản tiền cọc, thời hạn hợp đồng "
@@ -363,8 +401,6 @@ class MockProvider(BaseLLMProvider):
         # cụm "mã đặt lịch", khiến lượt SAU tự kích hoạt đặt lịch dù khách chỉ hỏi
         # tìm nhà. Agent tự đầu độc ngữ cảnh của chính mình.
         # => Ý ĐỊNH phải đọc từ CÂU HỎI HIỆN TẠI, không phải từ cả transcript.
-        cur = user_line.lower()
-
         # Bắt câu PHỦ ĐỊNH. Khớp chuỗi thô sẽ hiểu nhầm "tôi có bảo bạn đặt lịch gì đâu?"
         # thành yêu cầu đặt lịch. Đây là hạn chế cố hữu của keyword matching —
         # LLM thật hiểu được phủ định, mock thì phải chặn thủ công.
@@ -377,11 +413,6 @@ class MockProvider(BaseLLMProvider):
         muon_xem_gio = muon_dat_lich or ((not phu_dinh) and any(
             k in cur for k in ["khung giờ", "xem nhà", "khi nào", "còn trống", "giờ nào", "lịch trống"]))
         muon_chi_tiet = any(k in cur for k in ["chi tiết", "thông tin", "cụ thể", "như nào", "thế nào"])
-
-        # Mã căn có thể đến từ 2 nguồn: Observation trong lượt này, HOẶC khối
-        # "CÁC CĂN ĐÃ ĐỀ CẬP TRONG HỘI THOẠI" mà app.py chèn từ lịch sử chat.
-        uuids = self._UUID_RE.findall(prompt)
-        co_lich_su = "ĐÃ ĐỀ CẬP TRONG HỘI THOẠI" in prompt
 
         # --- Bước 1 ---
         if n_obs == 0:
@@ -397,7 +428,7 @@ class MockProvider(BaseLLMProvider):
                         f"Action: check_viewing_slots[\"{uuids[0]}\"]")
 
             # Khách hỏi chi tiết căn đã nhắc tới -> xem chi tiết, TUYỆT ĐỐI không đặt lịch
-            if co_ma_can and muon_chi_tiet:
+            if co_ma_can and (muon_chi_tiet or nhac_lai_can):
                 return (f"Thought: Khách hỏi chi tiết căn đã nhắc ở lượt trước. Lấy mã "
                         f"{uuids[0]} từ lịch sử. Khách KHÔNG yêu cầu đặt lịch nên tôi "
                         f"không được gọi book_viewing.\n"

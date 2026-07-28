@@ -1,0 +1,66 @@
+%% ═══════════════════════════════════════════════════════════════════════
+%% HYBRID DECISION FLOWCHART
+%% Khi nào đi Chatbot path, khi nào đi ReAct Agent path
+%% Lab 03 — Trợ Lý Tìm & Đặt Lịch Xem Nhà Trọ / Căn Hộ Cho Thuê
+%% ═══════════════════════════════════════════════════════════════════════
+
+flowchart TD
+    Start(["👤 Khách hàng gửi yêu cầu"]) --> Router{"🔀 ROUTER<br/>Câu hỏi có cần DỮ LIỆU THẬT<br/>hoặc HÀNH ĐỘNG không?"}
+
+    %% ─────────── NHÁNH 1: CHATBOT BASELINE (Cấp độ 2) ───────────
+    Router -- "❌ KHÔNG — kiến thức chung,<br/>quy định, lời khuyên" --> CB1["💬 CHATBOT PATH<br/>CHATBOT_BASELINE_PROMPT"]
+    CB1 --> CB2["Đúng 1 lần gọi LLM<br/>llm_calls = 1 · tool_calls = 0"]
+    CB2 --> Answer(["✅ Trả lời khách hàng"])
+
+    %% ─────────── NHÁNH 2: REACT AGENT (Cấp độ 3) ───────────
+    Router -- "✅ CÓ — tra cứu căn hộ,<br/>khung giờ, đặt lịch" --> AG1["🧠 REACT AGENT PATH"]
+    AG1 --> Mem["🗂️ Nạp BỘ NHỚ HỘI THOẠI<br/>build_conversation_context()<br/>Lấy mã căn UUID từ các lượt chat trước<br/>(khách KHÔNG thể biết UUID 36 ký tự)"]
+    Mem --> Loop["🔄 VÒNG LẶP REACT — step = 1"]
+
+    Loop --> Call["1️⃣ CALL LLM<br/>gửi transcript + REACT_SYSTEM_PROMPT<br/>stop = STOP_SEQUENCES"]
+    Call --> Parse{"2️⃣ PARSE<br/>output là gì?"}
+
+    Parse -- "Final Answer:" --> Verify{"🔎 Dữ liệu trong câu trả lời<br/>có xuất hiện trong Observation?"}
+    Verify -- "Có — grounded" --> Answer
+    Verify -- "Không — nghi bịa" --> Fallback
+
+    Parse -- "Sai định dạng" --> Hint["💡 Chèn Observation gợi ý cú pháp<br/>KHÔNG lấy text rác làm câu trả lời"]
+    Hint --> IterGuard
+
+    Parse -- "Action: ten_tool[args]" --> RepGuard{"🛡️ GUARDRAIL 1<br/>Action này đã lặp >= 2 lần?"}
+    RepGuard -- "Rồi — Agent bị kẹt" --> Fallback
+    RepGuard -- "Chưa" --> Exec["3️⃣ EXECUTE<br/>tra AVAILABLE_TOOLS<br/>gọi hàm Python THẬT"]
+
+    Exec --> ToolCheck{"Tool tồn tại &<br/>tham số hợp lệ?"}
+    ToolCheck -- "Không" --> Err["⚠️ Trả chuỗi 'LỖI:'<br/>KÈM danh sách giá trị hợp lệ<br/>(không crash)"]
+    ToolCheck -- "Có" --> Data[("📂 listings.txt — 10.000 căn (đọc)<br/>📅 bookings.txt — lịch hẹn (đọc/GHI)")]
+    Data --> OK["✅ Kết quả thật từ Tool"]
+
+    Err --> Append
+    OK --> Append["4️⃣ APPEND<br/>ỨNG DỤNG chèn 'Observation: ...'<br/>❗ KHÔNG phải LLM tự viết"]
+
+    Append --> IterGuard{"🛡️ GUARDRAIL 2<br/>step < MAX_ITERATIONS = 8?"}
+    IterGuard -- "Còn ngân sách" --> Inc["step += 1"]
+    Inc --> Call
+    IterGuard -- "Hết ngân sách" --> Fallback["🛡️ SAFE FALLBACK<br/>FALLBACK_MESSAGE<br/>Xin lỗi lịch sự + chỉ cách sửa<br/>❌ TUYỆT ĐỐI không bịa"]
+    Fallback --> Answer
+
+    %% ─────────── OBSERVABILITY ───────────
+    Append -.->|ghi log| Log[("📊 Trace Log<br/>docs/trace_eval.md<br/>llm_calls · tool_calls · stop_reason")]
+    CB2 -.->|ghi log| Log
+    Fallback -.->|ghi log| Log
+
+    %% ─────────── STYLING ───────────
+    classDef chatbot fill:#d4f4dd,stroke:#22803c,stroke-width:2px,color:#14532d
+    classDef agent fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#1e3a8a
+    classDef guard fill:#fee2e2,stroke:#b91c1c,stroke-width:3px,color:#7f1d1d
+    classDef decision fill:#fef3c7,stroke:#b45309,stroke-width:2px,color:#78350f
+    classDef terminal fill:#f3e8ff,stroke:#7e22ce,stroke-width:2px,color:#581c87
+    classDef store fill:#e5e7eb,stroke:#4b5563,stroke-width:1px,color:#1f2937
+
+    class CB1,CB2 chatbot
+    class AG1,Mem,Loop,Call,Exec,OK,Append,Inc,Hint agent
+    class RepGuard,IterGuard,Fallback,Err guard
+    class Router,Parse,ToolCheck,Verify decision
+    class Start,Answer terminal
+    class Log,Data store

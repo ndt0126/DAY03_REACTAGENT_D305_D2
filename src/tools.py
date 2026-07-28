@@ -203,8 +203,9 @@ def _resolve_listing(ma_can):
     """
     listings = _load_listings()
     if _is_blank(ma_can):
+        # ⚠️ KHÔNG dùng UUID thật làm ví dụ — model sẽ học thuộc rồi bịa ra như dữ liệu thật.
         return None, ("LỖI: Thiếu tham số 'ma_can'. Hãy dùng mã căn lấy từ kết quả "
-                      "search_listings, ví dụ: get_listing_details[\"777417ce-a8ca-4b4f-b110-61c395a193fc\"]")
+                      "search_listings, dạng: get_listing_details[\"xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx\"]")
 
     key = str(ma_can).strip().strip("[]").lower()
     if key in listings:

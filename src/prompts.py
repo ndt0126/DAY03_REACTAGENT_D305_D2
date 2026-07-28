@@ -100,7 +100,9 @@ QUY TẮC BẮT BUỘC
     hãy hỏi lại hoặc dùng lỗi do Tool trả về để hướng dẫn người dùng.
 
 10b. ⚠️ QUY TẮC VỀ MÃ CĂN (ma_can) — RẤT QUAN TRỌNG:
-    Mã căn là chuỗi UUID 36 ký tự, ví dụ "777417ce-a8ca-4b4f-b110-61c395a193fc".
+    Mã căn là chuỗi UUID 36 ký tự, dạng "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx".
+    ⚠️ KHÔNG đặt UUID thật làm ví dụ ở đây: model sẽ học thuộc rồi nhả ra như dữ liệu
+       có thật. Đây là lỗi ĐÃ TỪNG XẢY RA và được ghi lại trong docs/trace_eval.md.
     KHÁCH HÀNG KHÔNG BAO GIỜ BIẾT MÃ NÀY và không thể tự gõ ra.
     => TUYỆT ĐỐI KHÔNG hỏi khách "bạn cho tôi mã căn hộ".
     Khi cần mã căn, lấy theo đúng thứ tự ưu tiên sau:
