@@ -2,31 +2,31 @@
   {
     "id": 1,
     "category": "🟢 Đơn giản (Chỉ cần LLM)",
-    "question": "Thủ đô của Việt Nam là gì?",
-    "expected_behavior": "Chatbot trả lời trực tiếp từ kiến thức có sẵn."
+    "question": "Cho mình xin 3 kinh nghiệm quan trọng nhất khi tân sinh viên tìm thuê phòng trọ lần đầu?",
+    "expected_behavior": "Chatbot trả lời trực tiếp từ kiến thức có sẵn về kinh nghiệm chọn phòng, hợp đồng và an ninh."
   },
   {
     "id": 2,
     "category": "🟢 Đơn giản (Chỉ cần LLM)",
-    "question": "Nêu 3 lời khuyên để học tốt lập trình.",
-    "expected_behavior": "Chatbot trả lời trực tiếp từ kiến thức có sẵn."
+    "question": "Hợp đồng thuê nhà trọ chuẩn cần lưu ý những khoản phí dịch vụ phát sinh nào?",
+    "expected_behavior": "Chatbot liệt kê các loại phí cơ bản như tiền điện, nước, dịch vụ vệ sinh, wifi, phí gửi xe."
   },
   {
     "id": 3,
-    "category": "🟡 Multi-step (Cần Tool)",
-    "question": "Thời tiết ở Hà Nội hôm nay thế nào và tôi nên mặc gì đi chơi?",
-    "expected_behavior": "Agent gọi tool get_weather('Hà Nội') rồi suy luận trang phục."
+    "category": "🟡 Single-step (Cần gọi 1 Tool)",
+    "question": "Tìm giúp tôi phòng trọ hoặc căn hộ cho thuê ở quận Cầu Giấy giá dưới 5 triệu/tháng.",
+    "expected_behavior": "Agent nhận diện nhu cầu, gọi tool search_apartments(location='Cầu Giấy', max_price=5000000) và tổng hợp danh sách trả về."
   },
   {
     "id": 4,
-    "category": "🟡 Multi-step (Cần gọi 2 Tools)",
-    "question": "Kiểm tra vé máy bay từ TP.HCM đi Hà Nội ngày mai và dự báo thời tiết ở Hà Nội.",
-    "expected_behavior": "Agent gọi tool search_flights và get_weather để trả lời đầy đủ."
+    "category": "🟡 Multi-step (Cần gọi 2-3 Tools)",
+    "question": "Tìm căn hộ 1PN ở Bình Thạnh giá dưới 8 triệu, xem chi tiết căn phù hợp nhất và đặt lịch xem nhà lúc 09:30 sáng ngày 30/07/2026 cho Nguyễn Văn A, SĐT 0912345678.",
+    "expected_behavior": "Agent gọi search_apartments -> get_apartment_details -> book_viewing_schedule và xác nhận mã đặt lịch cho người dùng."
   },
   {
     "id": 5,
-    "category": "🔴 Edge Case (Bẫy Guardrail)",
-    "question": "Tra cứu thời tiết ở thành phố Atlantis ngày 32/13/2026.",
-    "expected_behavior": "Tool báo lỗi tham số/thất bại, Guardrail ngắt sau 3 bước và trả về thông báo lịch sự."
+    "category": "🔴 Edge Case (Bẫy Guardrail & Lỗi Tool)",
+    "question": "Tôi muốn xem thông tin và đặt lịch xem căn hộ mã AP-99999 ở khu vực Sao Hỏa vào ngày 32/13/2026.",
+    "expected_behavior": "Tool báo lỗi không tìm thấy phòng/địa điểm vô lý, Guardrail ngắt an toàn ngắt lặp và Agent đưa ra thông báo lịch sự."
   }
 ]

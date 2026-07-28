@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RentAgent AI — Trợ Lý Tìm & Đặt Lịch Xem Nhà Trọ</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="light-mode">
+
+    <div class="app-container">
+        <!-- HEADER TOPBAR -->
+        <header class="app-header">
+            <div class="brand">
+                <div class="logo-icon">
+                    <i class="fa-solid fa-house-user"></i>
+                </div>
+                <div class="brand-text">
+                    <h1>RentAgent <span>AI</span></h1>
+                    <p>Trợ Lý Tìm & Đặt Lịch Xem Nhà Trọ / Căn Hộ Cho Thuê</p>
+                </div>
+            </div>
+
+            <!-- MODE SWITCHER & PROVIDER BADGE -->
+            <div class="header-controls">
+                <div class="provider-badge" id="providerBadge">
+                    <span class="status-dot"></span>
+                    <span id="providerText">Provider: Loading...</span>
+                </div>
+
+                <div class="mode-toggle-group">
+                    <button class="mode-btn active" id="modeReactBtn" data-mode="react">
+                        <i class="fa-solid fa-brain"></i>
+                        <span>ReAct Agent (Tools)</span>
+                    </button>
+                    <button class="mode-btn" id="modeBaselineBtn" data-mode="baseline">
+                        <i class="fa-solid fa-comments"></i>
+                        <span>Chatbot Baseline</span>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- MAIN LAYOUT CONTENT -->
+        <div class="main-layout">
+            <!-- SIDEBAR -->
+            <aside class="sidebar">
+                <!-- SECTION 1: QUICK TEST CASES -->
+                <div class="sidebar-card">
+                    <div class="card-header">
+                        <i class="fa-solid fa-vial-circle-check"></i>
+                        <h3>Test Cases (config/test_cases.json)</h3>
+                    </div>
+                    <p class="card-subtitle">Bấm câu mẫu để chạy thử so sánh Chatbot vs ReAct Agent:</p>
+                    <div class="test-cases-list" id="testCasesList">
+                        <div class="skeleton-loader">Đang tải test cases...</div>
+                    </div>
+                </div>
+
+                <!-- SECTION 2: FEATURED LISTINGS -->
+                <div class="sidebar-card">
+                    <div class="card-header">
+                        <i class="fa-solid fa-building-user"></i>
+                        <h3>Căn Hộ Mẫu Trong Kho Dữ Liệu</h3>
+                    </div>
+                    <div class="listings-scroll" id="featuredListings">
+                        <div class="skeleton-loader">Đang tải danh sách phòng...</div>
+                    </div>
+                </div>
+
+                <!-- SECTION 3: TOOL SPECS REGISTRY -->
+                <div class="sidebar-card">
+                    <div class="card-header">
+                        <i class="fa-solid fa-screwdriver-wrench"></i>
+                        <h3>Tool Specs (src/tools.py)</h3>
+                    </div>
+                    <div class="tools-list" id="toolsList">
+                        <div class="skeleton-loader">Đang tải công cụ...</div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- CHAT WORKSPACE -->
+            <main class="chat-workspace">
+                <div class="chat-header-bar">
+                    <div class="chat-title-info">
+                        <h2 id="currentModeTitle">🤖 Chế độ: ReAct Agent (Suy Luận Thought ➔ Action ➔ Observation)</h2>
+                        <span class="mode-desc" id="currentModeDesc">Agent có khả năng tự gọi công cụ tra cứu phòng trọ, xem thông tin và đặt lịch hẹn thực tế.</span>
+                    </div>
+                    <button class="clear-btn" id="clearChatBtn" title="Xóa lịch sử chat">
+                        <i class="fa-solid fa-trash-can"></i> Xóa Chat
+                    </button>
+                </div>
+
+                <!-- CHAT MESSAGES CONTAINER -->
+                <div class="chat-messages" id="chatMessages">
+                    <!-- Welcome Message -->
+                    <div class="message-row assistant-row">
+                        <div class="avatar assistant-avatar">
+                            <i class="fa-solid fa-robot"></i>
+                        </div>
+                        <div class="message-bubble assistant-bubble">
+                            <div class="bubble-header">
+                                <span class="agent-name">RentAgent AI</span>
+                                <span class="time-stamp">Vừa xong</span>
+                            </div>
+                            <div class="bubble-body">
+                                Xin chào! Tôi là **Trợ Lý AI Tìm & Đặt Lịch Xem Nhà Trọ / Căn Hộ Cho Thuê**.
+                                
+                                Bạn có thể yêu cầu tôi:
+                                - 🔍 **Tìm phòng trọ/căn hộ**: *"Tìm giúp tôi phòng trọ Cầu Giấy dưới 5 triệu"*
+                                - 📋 **Xem chi tiết & Tiện ích**: *"Xem chi tiết căn hộ mã AP-102"*
+                                - 📅 **Đặt lịch xem nhà**: *"Đặt lịch xem căn AP-102 lúc 9:30 sáng 30/07 cho anh A (0912345678)"*
+                                
+                                💡 *Mẹo: Bạn có thể chọn các **Test Cases mẫu** ở cột bên trái để thử nghiệm ngay!*
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CHAT INPUT CONTROLLER -->
+                <div class="chat-input-area">
+                    <div class="quick-prompts">
+                        <span class="quick-tag" onclick="sendQuickText('Tìm phòng trọ ở Cầu Giấy giá dưới 5 triệu')"><i class="fa-solid fa-magnifying-glass"></i> Cầu Giấy &lt; 5Tr</span>
+                        <span class="quick-tag" onclick="sendQuickText('Tìm căn hộ 1PN ở Bình Thạnh giá dưới 8 triệu')"><i class="fa-solid fa-building"></i> Bình Thạnh 1PN &lt; 8Tr</span>
+                        <span class="quick-tag" onclick="sendQuickText('Kinh nghiệm thuê phòng trọ tân sinh viên cần lưu ý gì?')"><i class="fa-solid fa-lightbulb"></i> Kinh nghiệm thuê nhà</span>
+                    </div>
+
+                    <form id="chatForm" class="input-form">
+                        <textarea 
+                            id="userInput" 
+                            placeholder="Nhập yêu cầu tìm phòng hoặc đặt lịch xem nhà tại đây..." 
+                            rows="2"
+                            required
+                        ></textarea>
+                        <button type="submit" id="sendBtn" class="send-btn">
+                            <i class="fa-solid fa-paper-plane"></i>
+                            <span>Gửi</span>
+                        </button>
+                    </form>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- SCRIPT -->
+    <script src="script.js"></script>
+</body>
+</html>

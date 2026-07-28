@@ -133,11 +133,76 @@ class OpenRouterProvider(BaseLLMProvider):
 
 class MockProvider(BaseLLMProvider):
     """Offline Mock Provider (Cho bài test không cần kết nối API)"""
+    def __init__(self):
+        self.model_name = "Offline Mock Engine"
+
     def generate(self, prompt: str, system_prompt: str = "") -> str:
         text = prompt.lower()
-        if "thời tiết" in text and "hà nội" in text:
-            return "Thought: Cần tra cứu thời tiết Hà Nội.\nAction: get_weather['Hà Nội']"
-        return "🤖 [Mock Provider]: Phản hồi giả lập offline cho bài test."
+        
+        # Checking if prompt contains previous observation
+        if "observation:" in text:
+            if "ap-102" in text and "đã xác nhận" not in text:
+                if "chi tiết căn hộ" in text:
+                    return (
+                        "Thought: Đã xem chi tiết căn AP-102, tiến hành đặt lịch xem nhà cho khách hàng.\n"
+                        "Action: book_viewing_schedule['AP-102', 'Nguyễn Văn A', '0912345678', '30/07/2026', '09:30']"
+                    )
+                return (
+                    "Thought: Đã tìm thấy căn AP-102 phù hợp, tiếp theo xem chi tiết căn này.\n"
+                    "Action: get_apartment_details['AP-102']"
+                )
+            elif "đặt lịch xem nhà thành công" in text or "bk-" in text:
+                return (
+                    "Thought: Tôi đã có đủ thông tin thực tế từ công cụ để hoàn tất trả lời.\n"
+                    "Final Answer: Đã tìm thấy căn hộ Studio Bình Thạnh (AP-102) giá 7.2 tr/tháng. Đã đặt lịch xem nhà thành công với Mã hẹn BK-8821 vào lúc 09:30 ngày 30/07/2026 cho anh Nguyễn Văn A!"
+                )
+            elif "tìm thấy" in text and "cầu giấy" in text:
+                return (
+                    "Thought: Tôi đã có đủ thông tin các phòng trọ ở Cầu Giấy dưới 5 triệu.\n"
+                    "Final Answer: Đã tìm thấy phòng trọ khép kín mã AP-101 tại Cầu Giấy giá 4.5 triệu/tháng đầy đủ nội thất (điều hòa, nóng lạnh, ban công)."
+                )
+            elif "lỗi" in text or "không tìm thấy" in text:
+                return (
+                    "Thought: Tool báo lỗi không tìm thấy địa điểm/mã căn hộ phù hợp.\n"
+                    "Final Answer: Rất tiếc, hệ thống không tìm thấy căn hộ hợp lệ theo yêu cầu của bạn. Vui lòng kiểm tra lại thông tin mã phòng hoặc khu vực."
+                )
+
+        # Initial prompt handling
+        if "cầu giấy" in text and "5 triệu" in text:
+            return (
+                "Thought: Cần tìm kiếm phòng trọ ở Cầu Giấy giá dưới 5 triệu.\n"
+                "Action: search_apartments['Cầu Giấy', '5000000']"
+            )
+        elif "bình thạnh" in text or "1pn" in text or "đặt lịch" in text:
+            return (
+                "Thought: Cần tìm căn hộ 1PN / Studio ở Bình Thạnh giá dưới 8 triệu trước.\n"
+                "Action: search_apartments['Bình Thạnh', '8000000', '1PN']"
+            )
+        elif "ap-99999" in text or "sao hỏa" in text:
+            return (
+                "Thought: Cần tra cứu chi tiết căn hộ AP-99999.\n"
+                "Action: get_apartment_details['AP-99999']"
+            )
+        elif "kinh nghiệm" in text or "tân sinh viên" in text:
+            return (
+                "Ba kinh nghiệm quan trọng nhất khi thuê phòng trọ lần đầu:\n"
+                "1. Kiểm tra kỹ hợp đồng thuê nhà: Tiền cọc, điều khoản tăng giá và thời hạn báo trước khi chuyển đi.\n"
+                "2. Xác minh chi phí dịch vụ: Đơn giá điện, nước, internet, phí vệ sinh và gửi xe.\n"
+                "3. Khảo sát trực tiếp phòng: An ninh khu vực, ngập nước khi mưa, khóa cổng và ánh sáng thông thoáng."
+            )
+        elif "hợp đồng" in text or "phí" in text:
+            return (
+                "Các khoản phí dịch vụ phổ biến trong hợp đồng thuê nhà:\n"
+                "1. Tiền phòng cố định hàng tháng.\n"
+                "2. Tiền điện (theo số kWh công tơ riêng) & Tiền nước (theo m3 hoặc đầu người).\n"
+                "3. Phí dịch vụ chung: Wifi, vệ sinh hành lang, thang máy, phí gửi xe."
+            )
+            
+        return (
+            "Thought: Cần tìm kiếm phòng trọ theo yêu cầu người dùng.\n"
+            "Action: search_apartments['Cầu Giấy', '5000000']"
+        )
+
 
 
 def get_llm_provider(provider_name: str = None) -> BaseLLMProvider:
