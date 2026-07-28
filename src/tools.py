@@ -16,10 +16,12 @@ NGUYÊN TẮC BẤT BIẾN CỦA TOOL (Tool Contract)
 """
 
 from datetime import datetime
+import hashlib
+import csv
+import os
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 📦 DỮ LIỆU GIẢ LẬP (Deterministic — cùng input luôn cho cùng output)
-# Trong dự án thật, phần này sẽ là truy vấn database hoặc gọi API bên thứ ba.
+# 📦 DỮ LIỆU GIẢ LẬP VÀ DANH SÁCH 10.000 CĂN (Deterministic)
 # ═══════════════════════════════════════════════════════════════════════════
 
 _LISTINGS = {
