@@ -18,7 +18,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const currentModeTitle = document.getElementById("currentModeTitle");
     const currentModeDesc = document.getElementById("currentModeDesc");
     
-    const providerText = document.getElementById("providerText");
+    const providerSelect = document.getElementById("providerSelect");
     const testCasesList = document.getElementById("testCasesList");
     const featuredListings = document.getElementById("featuredListings");
     const toolsList = document.getElementById("toolsList");
@@ -28,11 +28,32 @@ document.addEventListener("DOMContentLoaded", () => {
     // ---------------------------------------------------------
     async function init() {
         await Promise.all([
+            fetchProviders(),
             fetchTestCases(),
             fetchListings(),
             fetchTools()
         ]);
     }
+
+    async function fetchProviders() {
+        try {
+            const res = await fetch("/api/providers");
+            const data = await res.json();
+            if (data.providers && data.providers.length > 0) {
+                providerSelect.innerHTML = "";
+                data.providers.forEach((p) => {
+                    const opt = document.createElement("option");
+                    opt.value = p.id;
+                    opt.textContent = p.name;
+                    if (p.active) opt.selected = true;
+                    providerSelect.appendChild(opt);
+                });
+            }
+        } catch (err) {
+            console.log("Could not load providers", err);
+        }
+    }
+
 
     async function fetchTestCases() {
         try {
@@ -173,21 +194,22 @@ document.addEventListener("DOMContentLoaded", () => {
         const loadingId = appendLoadingMessage();
 
         try {
+            const selectedProvider = providerSelect ? providerSelect.value : "mock";
             const response = await fetch("/api/chat", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ query: query, mode: currentMode })
+                body: JSON.stringify({ 
+                    query: query, 
+                    mode: currentMode,
+                    provider: selectedProvider
+                })
             });
             const data = await response.json();
-
-            // Update Provider status badge
-            if (data.provider) {
-                providerText.textContent = `${data.provider} (${data.model})`;
-            }
 
             // Remove loading and append Assistant Response
             removeMessage(loadingId);
             appendAssistantMessage(data);
+
 
         } catch (err) {
             removeMessage(loadingId);

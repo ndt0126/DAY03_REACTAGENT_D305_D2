@@ -51,7 +51,11 @@ def load_test_cases():
     if not os.path.exists(config_path):
         config_path = "test_cases.json"
     with open(config_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+        if isinstance(data, dict) and "test_cases" in data:
+            return data["test_cases"]
+        return data
+
 
 
 def parse_action_call(response_text: str):
@@ -260,17 +264,31 @@ def api_get_listings():
     """Trả về danh sách phòng trọ mẫu cho UI preview"""
     return jsonify(SAMPLE_APARTMENTS)
 
+@app.route("/api/providers", methods=["GET"])
+def api_get_providers():
+    """Trả về danh sách các LLM Provider hỗ trợ"""
+    active_env_provider = (os.getenv("LLM_PROVIDER") or "mock").lower().strip()
+    providers = [
+        {"id": "mock", "name": "Offline Mock Mode", "active": active_env_provider == "mock"},
+        {"id": "gemini", "name": "Google Gemini", "active": active_env_provider == "gemini"},
+        {"id": "openai", "name": "OpenAI (GPT-4o)", "active": active_env_provider == "openai"},
+        {"id": "anthropic", "name": "Anthropic Claude", "active": active_env_provider == "anthropic"},
+        {"id": "openrouter", "name": "OpenRouter API", "active": active_env_provider == "openrouter"}
+    ]
+    return jsonify({"providers": providers, "current": active_env_provider})
+
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
     """API endpoint xử lý tin nhắn từ giao diện chatbot"""
     data = request.json or {}
     user_query = data.get("query", "").strip()
     mode = data.get("mode", "react").lower()
+    provider_name = data.get("provider", None)
     
     if not user_query:
         return jsonify({"error": "Nội dung câu hỏi không được để trống"}), 400
         
-    provider = get_llm_provider()
+    provider = get_llm_provider(provider_name)
     
     if mode == "baseline":
         res = run_baseline_chatbot(user_query, provider)
@@ -280,6 +298,7 @@ def api_chat():
     res["provider"] = provider.__class__.__name__
     res["model"] = getattr(provider, "model_name", "Mock Model")
     return jsonify(res)
+
 
 
 import socket

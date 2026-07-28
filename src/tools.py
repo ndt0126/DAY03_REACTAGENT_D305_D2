@@ -279,6 +279,31 @@ def book_viewing(listing_id: str, slot: str) -> str:
         return f"LỖI: Sự cố không mong muốn trong book_viewing ({type(e).__name__}: {e})."
 
 
+SAMPLE_APARTMENTS = [
+    {
+        "id": code,
+        "title": item["title"],
+        "location": item["district"],
+        "district": item["district"],
+        "city": "Hà Nội",
+        "address": item["address"],
+        "price": item["price"],
+        "price_display": f"{item['price'] / 1000000:.1f}".rstrip('0').rstrip('.') + " triệu VNĐ/tháng",
+        "room_type": f"{item['bedrooms']}PN / Studio" if item["bedrooms"] == 1 else f"{item['bedrooms']}PN",
+        "area": f"{item['area_m2']}m2",
+        "amenities": item["amenities"].split(", ") if isinstance(item["amenities"], str) else item["amenities"],
+        "status": item["status"]
+    }
+    for code, item in _LISTINGS.items()
+]
+
+# Aliases for tool function names
+search_apartments = search_listings
+get_apartment_details = get_listing_details
+book_viewing_schedule = book_viewing
+check_schedule_status = check_viewing_slots
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # 📇 TOOL REGISTRY — nguồn sự thật duy nhất cho cả app.py và prompts.py
 # ═══════════════════════════════════════════════════════════════════════════
@@ -287,7 +312,12 @@ AVAILABLE_TOOLS = {
     "get_listing_details": get_listing_details,
     "check_viewing_slots": check_viewing_slots,
     "book_viewing": book_viewing,
+    "search_apartments": search_listings,
+    "get_apartment_details": get_listing_details,
+    "book_viewing_schedule": book_viewing,
+    "check_schedule_status": check_viewing_slots,
 }
+
 
 
 if __name__ == "__main__":

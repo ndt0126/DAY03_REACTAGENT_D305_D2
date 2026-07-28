@@ -27,12 +27,20 @@
                 </div>
             </div>
 
-            <!-- MODE SWITCHER & PROVIDER BADGE -->
+            <!-- MODE SWITCHER & PROVIDER DROPDOWN -->
             <div class="header-controls">
-                <div class="provider-badge" id="providerBadge">
+                <div class="provider-select-wrapper" id="providerWrapper">
                     <span class="status-dot"></span>
-                    <span id="providerText">Provider: Loading...</span>
+                    <i class="fa-solid fa-server provider-icon"></i>
+                    <select id="providerSelect" class="provider-dropdown" title="Chọn AI Provider">
+                        <option value="mock">Offline Mock Mode</option>
+                        <option value="gemini">Google Gemini</option>
+                        <option value="openai">OpenAI (GPT-4o)</option>
+                        <option value="anthropic">Anthropic Claude</option>
+                        <option value="openrouter">OpenRouter API</option>
+                    </select>
                 </div>
+
 
                 <div class="mode-toggle-group">
                     <button class="mode-btn active" id="modeReactBtn" data-mode="react">
