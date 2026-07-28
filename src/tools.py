@@ -1,342 +1,335 @@
 """
 🛠️ TOOL REGISTRY & SCHEMAS (Dành cho Role 2: Tool & Spec Engineer)
-Chủ đề: Trợ Lý Tìm & Đặt Lịch Xem Nhà Trọ / Căn Hộ Cho Thuê
+
+CHỦ ĐỀ NHÓM: 🏠 Trợ Lý Tìm & Đặt Lịch Xem Nhà Trọ / Căn Hộ Cho Thuê (Đề tài #10)
+
+═══════════════════════════════════════════════════════════════════════════
+NGUYÊN TẮC BẤT BIẾN CỦA TOOL (Tool Contract)
+═══════════════════════════════════════════════════════════════════════════
+1. Tool KHÔNG BAO GIỜ raise Exception ra ngoài. Mọi lỗi phải được bắt và trả về
+   dưới dạng CHUỖI bắt đầu bằng "LỖI:". Lý do: lỗi nghiệp vụ là DỮ LIỆU để Agent
+   suy luận và đổi hướng, không phải là sự cố làm sập chương trình.
+2. Mỗi tool có docstring đầy đủ: mục đích, input schema, output schema, error
+   semantics, side effect. Docstring này được prompts.py đọc để tự sinh phần mô
+   tả tool trong REACT_SYSTEM_PROMPT -> mô tả luôn khớp với code thật.
+3. Tool trả về chuỗi NGƯỜI ĐỌC ĐƯỢC, đủ chi tiết để Agent trích dẫn làm bằng chứng.
 """
 
-import re
-import json
+from datetime import datetime
+import hashlib
+import csv
+import os
 
-# Cơ sở dữ liệu phòng trọ / căn hộ mẫu (Deterministic Mock Database)
-SAMPLE_APARTMENTS = [
-    {
-        "id": "AP-101",
-        "title": "Phòng trọ khép kín full đồ mới 100% Cầu Giấy",
-        "location": "Cầu Giấy, Hà Nội",
+# ═══════════════════════════════════════════════════════════════════════════
+# 📦 DỮ LIỆU GIẢ LẬP VÀ DANH SÁCH 10.000 CĂN (Deterministic)
+# ═══════════════════════════════════════════════════════════════════════════
+
+_LISTINGS = {
+    "APT001": {
+        "title": "Studio full nội thất, ban công",
         "district": "Cầu Giấy",
-        "city": "Hà Nội",
-        "address": "Số 15 ngõ 68 Cầu Giấy, Phường Quan Hoa, Quận Cầu Giấy, Hà Nội",
+        "address": "Số 12, ngõ 165 Xuân Thủy, Cầu Giấy, Hà Nội",
         "price": 4500000,
-        "price_display": "4.5 triệu VNĐ/tháng",
-        "room_type": "Phòng trọ khép kín",
-        "area": "28m2",
-        "amenities": ["Điều hòa", "Nóng lạnh", "Tủ lạnh", "Giường nệm", "Ban công", "Thang máy", "Khóa vân tay"],
-        "utilities": "Điện 3.8k/kWh, Nước 100k/người, Wifi 100k/phòng, Dịch vụ 150k/người",
-        "deposit": "1 tháng tiền phòng",
-        "landlord_phone": "0987-654-321 (Anh Hoàng - Chính chủ)",
-        "available_slots": ["09:00", "11:00", "14:30", "17:00"],
-        "status": "Còn phòng"
+        "area_m2": 28,
+        "bedrooms": 1,
+        "amenities": "Điều hòa, máy giặt riêng, nóng lạnh, wifi, thang máy",
+        "status": "Còn trống",
     },
-    {
-        "id": "AP-102",
-        "title": "Căn hộ Studio Studio ban công rộng view đẹp Bình Thạnh",
-        "location": "Bình Thạnh, TP.HCM",
-        "district": "Bình Thạnh",
-        "city": "TP.HCM",
-        "address": "245 Điện Biên Phủ, Phường 15, Quận Bình Thạnh, TP.HCM",
-        "price": 7200000,
-        "price_display": "7.2 triệu VNĐ/tháng",
-        "room_type": "Studio / 1PN",
-        "area": "35m2",
-        "amenities": ["Full nội thất cao cấp", "Máy giặt riêng", "Bếp từ", "Sofa", "Tủ quần áo lớn", "Bảo vệ 24/7"],
-        "utilities": "Điện 4.0k/kWh, Nước 120k/người, Phí quản lý 200k/tháng",
-        "deposit": "1.5 tháng tiền phòng",
-        "landlord_phone": "0912-888-999 (Chị Mai - Quản lý tòa nhà)",
-        "available_slots": ["09:30", "10:30", "15:00", "18:00"],
-        "status": "Còn phòng"
+    "APT002": {
+        "title": "Chung cư mini 2PN, gần ĐH Quốc Gia",
+        "district": "Cầu Giấy",
+        "address": "Số 48 Trần Thái Tông, Cầu Giấy, Hà Nội",
+        "price": 6800000,
+        "area_m2": 45,
+        "bedrooms": 2,
+        "amenities": "Điều hòa 2 phòng, bếp từ, chỗ để xe, an ninh 24/7",
+        "status": "Còn trống",
     },
-    {
-        "id": "AP-103",
-        "title": "Căn hộ 1PN Vinhomes Central Park Quận 1 / Bình Thạnh",
-        "location": "Bình Thạnh, TP.HCM",
-        "district": "Bình Thạnh",
-        "city": "TP.HCM",
-        "address": "208 Nguyễn Hữu Cảnh, Phường 22, Quận Bình Thạnh, TP.HCM",
-        "price": 12000000,
-        "price_display": "12 triệu VNĐ/tháng",
-        "room_type": "1PN",
-        "area": "52m2",
-        "amenities": ["Hồ bơi", "Gym", "Công viên", "Smart Lock", "Tủ lạnh Inverter", "Lò vi sóng"],
-        "utilities": "Theo giá nhà nước + Phí quản lý Vinhomes",
-        "deposit": "2 tháng tiền phòng",
-        "landlord_phone": "0903-111-222 (Anh Minh)",
-        "available_slots": ["10:00", "14:00", "16:00"],
-        "status": "Còn phòng"
-    },
-    {
-        "id": "AP-104",
-        "title": "Phòng trọ giá rẻ cho sinh viên Đống Đa",
-        "location": "Đống Đa, Hà Nội",
-        "district": "Đống Đa",
-        "city": "Hà Nội",
-        "address": "Ngõ 121 Chùa Láng, Phường Láng Thượng, Quận Đống Đa, Hà Nội",
+    "APT003": {
+        "title": "Phòng trọ giá rẻ, khép kín",
+        "district": "Thanh Xuân",
+        "address": "Ngõ 178 Nguyễn Trãi, Thanh Xuân, Hà Nội",
         "price": 3200000,
-        "price_display": "3.2 triệu VNĐ/tháng",
-        "room_type": "Phòng trọ",
-        "area": "20m2",
-        "amenities": ["Điều hòa", "Nóng lạnh", "Để xe tầng 1", "Giờ giấc tự do"],
-        "utilities": "Điện 3.5k/kWh, Nước 80k/người",
-        "deposit": "1 tháng tiền phòng",
-        "landlord_phone": "0977-333-444 (Bác Tuấn)",
-        "available_slots": ["08:30", "12:00", "17:30"],
-        "status": "Còn phòng"
+        "area_m2": 20,
+        "bedrooms": 1,
+        "amenities": "Nóng lạnh, wifi, gác xép",
+        "status": "Còn trống",
     },
-    {
-        "id": "AP-105",
-        "title": "Căn hộ 2PN Vinhomes Smart City Nam Từ Liêm",
-        "location": "Nam Từ Liêm, Hà Nội",
-        "district": "Nam Từ Liêm",
-        "city": "Hà Nội",
-        "address": "Tòa S2.01 Vinhomes Smart City, Tây Mỗ, Nam Từ Liêm, Hà Nội",
-        "price": 8500000,
-        "price_display": "8.5 triệu VNĐ/tháng",
-        "room_type": "2PN",
-        "area": "64m2",
-        "amenities": ["2 Phòng ngủ", "2 WC", "Điều hòa Multi", "Bếp từ âm", "Hệ sinh thái Vin", "Xe bus nội khu"],
-        "utilities": "Giá công tơ điện nước nhà nước + Phí quản lý",
-        "deposit": "1 tháng tiền phòng",
-        "landlord_phone": "0936-555-777 (Chị Hằng)",
-        "available_slots": ["09:00", "15:00", "18:30"],
-        "status": "Còn phòng"
-    }
-]
-
-# Lưu trữ danh sách đặt lịch giả lập trong bộ nhớ
-BOOKINGS_DB = {
-    "BK-8821": {
-        "booking_id": "BK-8821",
-        "apartment_id": "AP-102",
-        "apartment_title": "Căn hộ Studio Studio ban công rộng view đẹp Bình Thạnh",
-        "customer_name": "Nguyễn Văn A",
-        "phone": "0912345678",
-        "viewing_date": "30/07/2026",
-        "viewing_time": "09:30",
-        "status": "Đã xác nhận - Chờ xem nhà"
-    }
+    "APT004": {
+        "title": "Căn hộ dịch vụ cao cấp, view hồ",
+        "district": "Tây Hồ",
+        "address": "Số 5 Quảng An, Tây Hồ, Hà Nội",
+        "price": 12000000,
+        "area_m2": 60,
+        "bedrooms": 2,
+        "amenities": "Full nội thất cao cấp, dọn phòng hàng tuần, hồ bơi",
+        "status": "Còn trống",
+    },
+    "APT005": {
+        "title": "Phòng ghép sinh viên, đã cho thuê",
+        "district": "Thanh Xuân",
+        "address": "Ngõ 90 Khương Trung, Thanh Xuân, Hà Nội",
+        "price": 2000000,
+        "area_m2": 18,
+        "bedrooms": 1,
+        "amenities": "Wifi, chỗ để xe",
+        "status": "Đã cho thuê",
+    },
 }
 
+# Khung giờ xem nhà còn trống theo từng mã căn hộ
+_VIEWING_SLOTS = {
+    "APT001": ["2026-07-29 09:00", "2026-07-29 15:00", "2026-07-30 10:00"],
+    "APT002": ["2026-07-29 14:00", "2026-07-31 09:30"],
+    "APT003": ["2026-07-30 16:00"],
+    "APT004": ["2026-07-29 11:00", "2026-08-01 09:00"],
+    "APT005": [],  # Đã cho thuê nên không còn lịch xem
+}
 
-def _parse_price_value(price_input) -> float:
-    """Helper chuyển đổi chuỗi giá (e.g. '5 triệu', '5000000', '8tr') thành con số int/float"""
-    if isinstance(price_input, (int, float)):
-        return float(price_input)
-    if not price_input:
-        return float("inf")
-    
-    text = str(price_input).lower().strip()
-    # Tìm dạng 5000000
-    numbers = re.findall(r'\d+(?:\.\d+)?', text)
-    if not numbers:
-        return float("inf")
-    
-    val = float(numbers[0])
-    if "triệu" in text or "tr" in text or "m" in text:
-        if val < 1000:
-            val = val * 1000000
-    elif val < 1000 and "ngàn" not in text and "k" not in text:
-        val = val * 1000000
-        
-    return val
+# Bộ nhớ lưu các lịch hẹn đã đặt trong phiên chạy (side effect có chủ đích)
+_BOOKINGS = []
+
+_VALID_DISTRICTS = ["Cầu Giấy", "Thanh Xuân", "Tây Hồ", "Đống Đa", "Hai Bà Trưng"]
 
 
-def search_apartments(location: str = "", max_price: str = "", room_type: str = "") -> str:
-    """
-    Tìm kiếm nhà trọ / căn hộ cho thuê theo khu vực, giá tối đa và loại phòng.
-    
+# ═══════════════════════════════════════════════════════════════════════════
+# 🛠️ CÁC TOOL ĐƯỢC CẤP CHO AGENT
+# ═══════════════════════════════════════════════════════════════════════════
+
+def search_listings(district: str, max_price: str = "999999999") -> str:
+    """Tìm danh sách phòng trọ/căn hộ đang còn trống theo quận và mức giá tối đa.
+
+    Dùng khi: người dùng hỏi "có phòng nào ở quận X không", "tìm phòng dưới Y triệu".
+    Không dùng khi: người dùng đã biết mã căn hộ (khi đó dùng get_listing_details).
+
     Args:
-        location (str): Khu vực hoặc quận/huyện (Ví dụ: 'Cầu Giấy', 'Bình Thạnh', 'Hà Nội', 'TP.HCM')
-        max_price (str): Ngân sách tối đa (Ví dụ: '5000000', '5 triệu', '8tr')
-        room_type (str): Loại phòng (Ví dụ: 'Studio', '1PN', '2PN', 'Phòng trọ')
-        
+        district (str): Tên quận tại Hà Nội. Hợp lệ: Cầu Giấy, Thanh Xuân,
+            Tây Hồ, Đống Đa, Hai Bà Trưng.
+        max_price (str): Giá thuê tối đa mỗi tháng, đơn vị VNĐ (ví dụ: 5000000).
+
     Returns:
-        str: Danh sách căn hộ phù hợp kèm Mã phòng (ID), Giá, Địa chỉ và Tiện ích.
+        str: Danh sách căn hộ kèm mã (APTxxx), giá, diện tích. Nếu quận không hợp
+             lệ hoặc giá sai định dạng, trả về chuỗi bắt đầu bằng "LỖI:".
+
+    Side effect: Không (chỉ đọc dữ liệu).
     """
     try:
-        loc_clean = location.strip().lower() if location else ""
-        room_clean = room_type.strip().lower() if room_type else ""
-        price_limit = _parse_price_value(max_price)
-        
-        matches = []
-        for ap in SAMPLE_APARTMENTS:
-            # Check location
-            loc_match = True
-            if loc_clean:
-                search_space = f"{ap['location']} {ap['district']} {ap['city']} {ap['address']}".lower()
-                loc_match = any(term in search_space for term in loc_clean.split())
-                
-            # Check room type
-            type_match = True
-            if room_clean:
-                type_match = room_clean in ap['room_type'].lower() or room_clean in ap['title'].lower()
-                
-            # Check price
-            price_match = ap['price'] <= price_limit
-            
-            if loc_match and type_match and price_match:
-                matches.append(ap)
-                
-        if not matches:
-            return (
-                f"LỖI KHÔNG TÌM THẤY: Không có phòng trọ/căn hộ nào khớp với tiêu chí "
-                f"[Khu vực: '{location}', Giá tối đa: '{max_price}', Loại: '{room_type}']. "
-                f"Gợi ý: Thử mở rộng khu vực tìm kiếm hoặc tăng ngân sách."
+        if not district or not str(district).strip():
+            return "LỖI: Thiếu tham số 'district'. Cú pháp đúng: search_listings[\"Cầu Giấy\", 5000000]"
+
+        district = str(district).strip()
+
+        # Ép kiểu giá an toàn — LLM hay truyền "5 triệu" hoặc "5,000,000"
+        try:
+            price_clean = str(max_price).replace(",", "").replace(".", "").strip()
+            max_price_int = int(float(price_clean))
+        except (ValueError, TypeError):
+            return (f"LỖI: Tham số 'max_price' phải là số nguyên VNĐ, nhận được '{max_price}'. "
+                    f"Ví dụ đúng: search_listings[\"Cầu Giấy\", 5000000]")
+
+        # Kiểm tra quận có nằm trong vùng phục vụ không
+        matched = [d for d in _VALID_DISTRICTS if d.lower() == district.lower()]
+        if not matched:
+            return (f"LỖI: Không tìm thấy quận '{district}' trong khu vực phục vụ. "
+                    f"Các quận hợp lệ: {', '.join(_VALID_DISTRICTS)}.")
+        district = matched[0]
+
+        results = [
+            (code, item) for code, item in _LISTINGS.items()
+            if item["district"] == district
+            and item["price"] <= max_price_int
+            and item["status"] == "Còn trống"
+        ]
+
+        if not results:
+            return (f"Không có căn nào ở {district} với giá dưới {max_price_int:,} VNĐ. "
+                    f"Gợi ý: thử nâng ngân sách hoặc đổi sang quận khác.")
+
+        lines = [f"Tìm thấy {len(results)} căn tại {district} (giá <= {max_price_int:,} VNĐ):"]
+        for code, item in sorted(results, key=lambda x: x[1]["price"]):
+            lines.append(
+                f"- [{code}] {item['title']} | {item['price']:,} VNĐ/tháng | "
+                f"{item['area_m2']}m2 | {item['bedrooms']}PN | {item['status']}"
             )
-            
-        res = [f"🔍 TÌM THẤY {len(matches)} CĂN HỘ Phù Hợp:"]
-        for item in matches:
-            res.append(
-                f"- [MÃ: {item['id']}] {item['title']}\n"
-                f"  📍 Địa chỉ: {item['address']}\n"
-                f"  💰 Giá thuê: {item['price_display']} | Loại: {item['room_type']} ({item['area']})\n"
-                f"  ✨ Tiện ích: {', '.join(item['amenities'][:4])}"
-            )
-        return "\n\n".join(res)
+        return "\n".join(lines)
+
     except Exception as e:
-        return f"LỖI THỰC THI TOOL search_apartments: {str(e)}"
+        return f"LỖI: Sự cố không mong muốn trong search_listings ({type(e).__name__}: {e})."
 
 
-def get_apartment_details(apartment_id: str) -> str:
-    """
-    Xem thông tin chi tiết đầy đủ của một căn hộ theo Mã phòng (ID).
-    
+def get_listing_details(listing_id: str) -> str:
+    """Xem thông tin chi tiết của một căn hộ theo mã căn (APTxxx).
+
+    Dùng khi: cần địa chỉ đầy đủ, tiện ích, diện tích của một căn cụ thể.
+    Thường được gọi SAU search_listings để đào sâu một mã căn đã tìm thấy.
+
     Args:
-        apartment_id (str): Mã căn hộ (Ví dụ: 'AP-101', 'AP-102', 'AP-103')
-        
+        listing_id (str): Mã căn hộ, định dạng APT + 3 chữ số (ví dụ: APT001).
+
     Returns:
-        str: Chi tiết tiện ích, chi phí dịch vụ, tiền cọc, SĐT chủ nhà và các khung giờ xem nhà.
+        str: Thông tin chi tiết căn hộ, hoặc chuỗi "LỖI:" nếu mã không tồn tại.
+
+    Side effect: Không (chỉ đọc dữ liệu).
     """
     try:
-        ap_id_clean = apartment_id.strip().upper()
-        # Handle cases like get_apartment_details['AP-101']
-        ap_id_clean = re.sub(r'[\'\"\[\]]', '', ap_id_clean)
-        
-        found = None
-        for ap in SAMPLE_APARTMENTS:
-            if ap['id'].upper() == ap_id_clean:
-                found = ap
-                break
-                
-        if not found:
-            valid_ids = [a['id'] for a in SAMPLE_APARTMENTS]
-            return f"LỖI: Không tìm thấy căn hộ có mã '{apartment_id}'. Danh sách mã hợp lệ: {valid_ids}."
-            
+        if not listing_id or not str(listing_id).strip():
+            return "LỖI: Thiếu tham số 'listing_id'. Cú pháp đúng: get_listing_details[\"APT001\"]"
+
+        code = str(listing_id).strip().upper()
+        item = _LISTINGS.get(code)
+        if not item:
+            return (f"LỖI: Không tồn tại căn hộ với mã '{listing_id}'. "
+                    f"Các mã hợp lệ: {', '.join(_LISTINGS.keys())}.")
+
         return (
-            f"🏢 CHI TIẾT CĂN HỘ [MÃ: {found['id']}]\n"
-            f"📌 Tên: {found['title']}\n"
-            f"📍 Địa chỉ: {found['address']}\n"
-            f"💵 Giá thuê: {found['price_display']} (Cọc: {found['deposit']})\n"
-            f"📐 Diện tích: {found['area']} | Loại phòng: {found['room_type']}\n"
-            f"⚡ Phí dịch vụ: {found['utilities']}\n"
-            f"🛋️ Tiện ích: {', '.join(found['amenities'])}\n"
-            f"📞 Liên hệ chính chủ/quản lý: {found['landlord_phone']}\n"
-            f"⏰ Khung giờ xem nhà trống: {', '.join(found['available_slots'])}\n"
-            f"🟢 Trạng thái: {found['status']}"
+            f"Chi tiết căn [{code}]:\n"
+            f"- Tiêu đề : {item['title']}\n"
+            f"- Địa chỉ : {item['address']}\n"
+            f"- Giá thuê: {item['price']:,} VNĐ/tháng\n"
+            f"- Diện tích: {item['area_m2']}m2, {item['bedrooms']} phòng ngủ\n"
+            f"- Tiện ích: {item['amenities']}\n"
+            f"- Trạng thái: {item['status']}"
         )
     except Exception as e:
-        return f"LỖI THỰC THI TOOL get_apartment_details: {str(e)}"
+        return f"LỖI: Sự cố không mong muốn trong get_listing_details ({type(e).__name__}: {e})."
 
 
-def book_viewing_schedule(apartment_id: str, customer_name: str, phone: str, viewing_date: str, viewing_time: str) -> str:
-    """
-    Đặt lịch hẹn đi xem nhà trọ / căn hộ trực tiếp.
-    
+def check_viewing_slots(listing_id: str) -> str:
+    """Kiểm tra các khung giờ còn trống để đi xem nhà của một căn hộ.
+
+    Dùng khi: người dùng muốn biết "khi nào đi xem được".
+    Bắt buộc gọi TRƯỚC book_viewing để biết khung giờ nào hợp lệ.
+
     Args:
-        apartment_id (str): Mã căn hộ (Ví dụ: 'AP-102')
-        customer_name (str): Họ tên khách hàng (Ví dụ: 'Nguyễn Văn A')
-        phone (str): Số điện thoại liên hệ (Ví dụ: '0912345678')
-        viewing_date (str): Ngày xem nhà (Ví dụ: '30/07/2026' hoặc 'Ngày mai')
-        viewing_time (str): Giờ xem nhà (Ví dụ: '09:30', '15:00')
-        
+        listing_id (str): Mã căn hộ (ví dụ: APT001).
+
     Returns:
-        str: Mã xác nhận đặt lịch hẹn thành công hoặc thông báo lỗi.
+        str: Danh sách khung giờ định dạng 'YYYY-MM-DD HH:MM', hoặc "LỖI:" nếu
+             mã căn không tồn tại.
+
+    Side effect: Không (chỉ đọc dữ liệu).
     """
     try:
-        ap_id_clean = re.sub(r'[\'\"\[\]]', '', str(apartment_id)).strip().upper()
-        
-        found = None
-        for ap in SAMPLE_APARTMENTS:
-            if ap['id'].upper() == ap_id_clean:
-                found = ap
-                break
-                
-        if not found:
-            return f"LỖI ĐẶT LỊCH: Mã căn hộ '{apartment_id}' không tồn tại trong hệ thống!"
-            
-        booking_code = f"BK-{len(BOOKINGS_DB) + 8821}"
-        booking_record = {
-            "booking_id": booking_code,
-            "apartment_id": found['id'],
-            "apartment_title": found['title'],
-            "customer_name": customer_name,
-            "phone": phone,
-            "viewing_date": viewing_date,
-            "viewing_time": viewing_time,
-            "status": "Đã xác nhận - Chờ xem nhà"
-        }
-        BOOKINGS_DB[booking_code] = booking_record
-        
-        return (
-            f"🎉 ĐẶT LỊCH XEM NHÀ THÀNH CÔNG!\n"
-            f"🎫 Mã lịch hẹn: {booking_code}\n"
-            f"🏠 Căn hộ: [{found['id']}] {found['title']}\n"
-            f"📍 Địa chỉ xem: {found['address']}\n"
-            f"👤 Khách hàng: {customer_name} (SĐT: {phone})\n"
-            f"📅 Thời gian hẹn: {viewing_time} ngày {viewing_date}\n"
-            f"📞 Hotline hỗ trợ xem nhà: {found['landlord_phone']}"
-        )
+        if not listing_id or not str(listing_id).strip():
+            return "LỖI: Thiếu tham số 'listing_id'. Cú pháp đúng: check_viewing_slots[\"APT001\"]"
+
+        code = str(listing_id).strip().upper()
+        if code not in _LISTINGS:
+            return (f"LỖI: Không tồn tại căn hộ với mã '{listing_id}'. "
+                    f"Các mã hợp lệ: {', '.join(_LISTINGS.keys())}.")
+
+        slots = _VIEWING_SLOTS.get(code, [])
+        # Loại bỏ khung giờ đã có người đặt trong phiên này
+        booked = {b["slot"] for b in _BOOKINGS if b["listing_id"] == code}
+        free = [s for s in slots if s not in booked]
+
+        if not free:
+            return (f"Căn [{code}] hiện không còn khung giờ xem nhà nào trống "
+                    f"(có thể căn đã được cho thuê hoặc lịch đã kín).")
+
+        return f"Căn [{code}] còn {len(free)} khung giờ xem nhà: " + "; ".join(free)
     except Exception as e:
-        return f"LỖI THỰC THI TOOL book_viewing_schedule: {str(e)}"
+        return f"LỖI: Sự cố không mong muốn trong check_viewing_slots ({type(e).__name__}: {e})."
 
 
-def check_schedule_status(booking_id_or_phone: str) -> str:
-    """
-    Tra cứu trạng thái lịch hẹn xem nhà đã đặt theo Mã lịch hẹn hoặc Số điện thoại.
-    
+def book_viewing(listing_id: str, slot: str) -> str:
+    """Đặt lịch hẹn đi xem nhà cho một căn hộ vào một khung giờ cụ thể.
+
+    Dùng khi: người dùng đã chọn được căn và khung giờ.
+    ⚠️ Đây là tool DUY NHẤT có side effect (ghi dữ liệu). Chỉ gọi khi đã xác nhận
+    khung giờ hợp lệ bằng check_viewing_slots.
+
     Args:
-        booking_id_or_phone (str): Mã lịch hẹn (e.g. 'BK-8821') hoặc SĐT đăng ký
-        
+        listing_id (str): Mã căn hộ (ví dụ: APT001).
+        slot (str): Khung giờ, định dạng bắt buộc 'YYYY-MM-DD HH:MM'.
+
     Returns:
-        str: Thông tin trạng thái lịch hẹn xem nhà.
+        str: Mã xác nhận đặt lịch, hoặc chuỗi "LỖI:" nếu mã căn sai, định dạng
+             ngày sai, hoặc khung giờ không nằm trong danh sách trống.
+
+    Side effect: CÓ — ghi thêm một bản ghi vào danh sách đặt lịch.
     """
     try:
-        query = re.sub(r'[\'\"\[\]]', '', str(booking_id_or_phone)).strip()
-        
-        matches = []
-        for bk in BOOKINGS_DB.values():
-            if bk['booking_id'].upper() == query.upper() or query in bk['phone']:
-                matches.append(bk)
-                
-        if not matches:
-            return f"THÔNG BÁO: Không tìm thấy lịch hẹn nào tương ứng với thông tin '{booking_id_or_phone}'."
-            
-        res = [f"📋 KẾT QUẢ TRA CỨU LỊCH HẸN ({len(matches)} lịch hẹn):"]
-        for bk in matches:
-            res.append(
-                f"- [Mã: {bk['booking_id']}] Căn hộ: {bk['apartment_title']}\n"
-                f"  Khách hàng: {bk['customer_name']} ({bk['phone']})\n"
-                f"  Lịch hẹn: {bk['viewing_time']} ngày {bk['viewing_date']}\n"
-                f"  Trạng thái: {bk['status']}"
-            )
-        return "\n\n".join(res)
+        code = str(listing_id).strip().upper() if listing_id else ""
+        if code not in _LISTINGS:
+            return (f"LỖI: Không tồn tại căn hộ với mã '{listing_id}'. "
+                    f"Các mã hợp lệ: {', '.join(_LISTINGS.keys())}.")
+
+        slot = str(slot).strip() if slot else ""
+        # Xác thực định dạng ngày giờ — bắt được cả ngày vô lý kiểu 32/13/2026
+        try:
+            datetime.strptime(slot, "%Y-%m-%d %H:%M")
+        except ValueError:
+            return (f"LỖI: Khung giờ '{slot}' sai định dạng hoặc không phải ngày có thật. "
+                    f"Định dạng bắt buộc: 'YYYY-MM-DD HH:MM' (ví dụ: '2026-07-29 09:00').")
+
+        if slot not in _VIEWING_SLOTS.get(code, []):
+            available = _VIEWING_SLOTS.get(code, [])
+            return (f"LỖI: Khung giờ '{slot}' không nằm trong lịch trống của căn [{code}]. "
+                    f"Khung giờ hợp lệ: {'; '.join(available) if available else 'không còn khung nào'}.")
+
+        if any(b["listing_id"] == code and b["slot"] == slot for b in _BOOKINGS):
+            return f"LỖI: Khung giờ '{slot}' của căn [{code}] vừa có người khác đặt mất rồi."
+
+        booking_id = f"BK{len(_BOOKINGS) + 1:03d}"
+        _BOOKINGS.append({"booking_id": booking_id, "listing_id": code, "slot": slot})
+        return (f"Đặt lịch thành công! Mã xác nhận: {booking_id}. "
+                f"Bạn sẽ xem căn [{code}] — {_LISTINGS[code]['address']} vào lúc {slot}.")
     except Exception as e:
-        return f"LỖI THỰC THI TOOL check_schedule_status: {str(e)}"
+        return f"LỖI: Sự cố không mong muốn trong book_viewing ({type(e).__name__}: {e})."
 
 
-# Backward compatibility helpers (keep old tools registered so no breaking changes if referenced)
-def get_weather(location: str) -> str:
-    """Tra cứu thời tiết hỗ trợ phụ"""
-    return f"Thời tiết tại {location}: 29°C, Nắng nhẹ, Mát mẻ."
-
-def search_flights(origin: str, destination: str) -> str:
-    """Tra cứu chuyến bay hỗ trợ phụ"""
-    return f"Chuyến bay {origin} -> {destination}: Khởi hành 08:00 - Giá 1.500.000 VNĐ."
-
-
-# Registry các tool khả dụng cho ReAct Agent
+# ═══════════════════════════════════════════════════════════════════════════
+# 📇 TOOL REGISTRY — nguồn sự thật duy nhất cho cả app.py và prompts.py
+# ═══════════════════════════════════════════════════════════════════════════
 AVAILABLE_TOOLS = {
-    "search_apartments": search_apartments,
-    "get_apartment_details": get_apartment_details,
-    "book_viewing_schedule": book_viewing_schedule,
-    "check_schedule_status": check_schedule_status,
-    "get_weather": get_weather,
-    "search_flights": search_flights
+    "search_listings": search_listings,
+    "get_listing_details": get_listing_details,
+    "check_viewing_slots": check_viewing_slots,
+    "book_viewing": book_viewing,
 }
+
+
+if __name__ == "__main__":
+    # 🧪 UNIT TEST TOOL ĐỘC LẬP — chạy: python src/tools.py
+    # Codelab Mốc 3 yêu cầu: test tool riêng TRƯỚC khi gắn vào Agent, để khi
+    # Agent chạy sai ta biết chắc lỗi không nằm ở tầng tool.
+    import sys
+    if sys.stdout.encoding != "utf-8":
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
+    cases = [
+        ("Happy path: tìm phòng", lambda: search_listings("Cầu Giấy", "5000000")),
+        ("Quận không hợp lệ",     lambda: search_listings("Atlantis", "5000000")),
+        ("Giá sai định dạng",     lambda: search_listings("Cầu Giấy", "năm triệu")),
+        ("Thiếu tham số",         lambda: search_listings("", "")),
+        ("Chi tiết căn hợp lệ",   lambda: get_listing_details("APT001")),
+        ("Mã căn không tồn tại",  lambda: get_listing_details("APT999")),
+        ("Lịch xem còn trống",    lambda: check_viewing_slots("APT001")),
+        ("Lịch xem đã kín",       lambda: check_viewing_slots("APT005")),
+        ("Đặt lịch thành công",   lambda: book_viewing("APT001", "2026-07-29 09:00")),
+        ("Ngày vô lý 32/13",      lambda: book_viewing("APT001", "2026-13-32 09:00")),
+        ("Khung giờ không có",    lambda: book_viewing("APT001", "2026-07-29 23:00")),
+        ("Đặt trùng khung giờ",   lambda: book_viewing("APT001", "2026-07-29 09:00")),
+    ]
+
+    print("=" * 70)
+    print("🧪 UNIT TEST TOOL REGISTRY (Role 2)")
+    print("=" * 70)
+    passed = 0
+    for name, fn in cases:
+        try:
+            out = fn()
+            ok = isinstance(out, str) and len(out) > 0
+            print(f"\n{'✅' if ok else '❌'} {name}\n   -> {out}")
+            passed += 1 if ok else 0
+        except Exception as e:
+            # Nếu rơi vào đây nghĩa là tool đã VI PHẠM hợp đồng "không được crash"
+            print(f"\n💥 {name} -> CRASH! {type(e).__name__}: {e}")
+
+    print("\n" + "=" * 70)
+    print(f"KẾT QUẢ: {passed}/{len(cases)} test trả về chuỗi an toàn, 0 crash.")
+    print("=" * 70)
